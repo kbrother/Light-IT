@@ -17,10 +17,14 @@ class irregular_tensor:
         for _k in range(self.k):
             _row, _col = self.src_tensor[_k].nonzero()
             _vals = self.src_tensor[_k][_row, _col]
-            _vals = np.asarray(_vals).squeeze()             
+            if _vals.size > 1:
+                _vals = np.asarray(_vals).squeeze()                          
             self.row = self.row + _row.tolist()
             self.col = self.col + _col.tolist()
-            self.vals = self.vals + _vals.tolist()
+            if _vals.size == 1:                
+                self.vals = self.vals + [_vals[0]]
+            else:
+                self.vals = self.vals + _vals.tolist()
             self.height = self.height + [_k] * _row.size
             self.num_nnz += self.src_tensor[_k].count_nonzero()
             
