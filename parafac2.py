@@ -4,6 +4,21 @@ import math
 import torch
 from tqdm import tqdm
 import numpy as np
+import gc
+
+# input1: k x row1 x col1
+# input2: k x row2 x col2
+def batch_kron(input1, input2):
+    num_row1, num_col1 = input1.shape[1], input1.shape[2]
+    num_row2, num_col2 = input2.shape[1], input2.shape[2]
+    input1 = torch.repeat_interleave(input1, num_row2, dim=1)
+    input1 = torch.repeat_interleave(input1, num_col2, dim=2)  # k x row1*row2 x col1*col2
+    input2 = input2.repeat(1, num_row1, 1)    
+    input2 = input2.repeat(1, 1, num_col1)    
+    #print(input1.shape)
+    #print(input2.shape)
+    return input1 * input2
+
 
 class parafac2:
     
@@ -15,10 +30,10 @@ class parafac2:
         _U = factor_mat['U'][0, :]
         self.S, self.V = factor_mat['S'], factor_mat['V']
         self.rank = self.S.shape[1]        
-        
+                
         self.U = np.zeros((_tensor.k, _tensor.i_max, self.rank))   # k x i_max x rank
         self.U_mask = torch.zeros((_tensor.k, _tensor.i_max, self.rank), device=device, dtype=torch.double)   # k x i_max x rank, 1 means the valid area
-        self.centroids = torch.rand((_tensor.i_max, self.rank), device=device, dtype=torch.double)    # cluster centers
+        self.centroids = torch.rand((_tensor.i_max, self.rank), device=device, dtype=torch.double)    # cluster centers,  i_max x rank
         self.centroids = torch.nn.Parameter(self.centroids)
         for _k in range(_tensor.k):
             self.U[_k, :_tensor.i[_k], :] = _U[_k]
@@ -68,7 +83,9 @@ class parafac2:
             
         return sq_sum
 
-    
+    '''
+        cluster_label: k x i_max
+    '''
     def clustering(self):
         # Clustering
         with torch.no_grad():
@@ -107,6 +124,93 @@ class parafac2:
                     with open(args.output_path, 'a') as f:
                         f.write(f'epoch: {_epoch}, l2 loss: {_loss}, fitness: {_fitness}\n')
 
+                        
+    '''
+        Use svd to initialize tucker decomposition
+    '''
+    def init_tucker(self, args):
+        self.mapping = self.clustering()  # k x i_max
+        self.G = torch.zeros(self.rank, self.rank, self.rank, device=self.device, dtype=torch.double)
+        idx_list = list(range(self.rank))
+        self.G[idx_list, idx_list, idx_list] = 1        
+    
+        # SVD
+        Uu, Us, Uv = torch.linalg.svd(self.centroids.data, full_matrices=False)        
+        Vu, Vs, Vv = torch.linalg.svd(self.V.data, full_matrices=False)
+        Su, Ss, Sv = torch.linalg.svd(self.S.data, full_matrices=False)        
+        Usv = torch.diag(Us) @ Uv   # rank x rank
+        Vsv = torch.diag(Vs) @ Vv   # rank x rank
+        Ssv = torch.diag(Ss) @ Sv   # rank x rank
+        
+        # mode matrix product
+        self.centroids = Uu   # I_max x rank
+        self.G = torch.bmm(Usv.repeat(self.rank, 1, 1), torch.permute(self.G, (2, 0, 1)))
+        self.G = torch.permute(self.G, (1, 2, 0))        
+        
+        self.V = Vu  # J x rank
+        self.G = torch.bmm(Vsv.repeat(self.rank, 1, 1), self.G)
+        
+        self.S = Su  # K x rank
+        self.G = torch.bmm(Ssv.repeat(self.rank, 1, 1), torch.permute(self.G, (0, 2, 1)))
+        self.G = torch.permute(self.G, (0, 2, 1))        
+        print(f'loss after loaded:{self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)}')
+        
+        
+    '''
+        input_U: k x i_max x rank
+        _row, _col, _height: batch size
+        return value: batch size
+    '''
+    def compute_irregular_tucker(self, input_U, _row, _col, _height):
+        _U = input_U[_height, _row, :]  # batch size x rank
+        _S = self.S[_height, :]        # batch size x rank
+        _V = self.V[_col, :]           # batch size x rank
+        _approx = torch.bmm(_U.unsqueeze(-1) , _V.unsqueeze(1))   # batch size x rank x rank
+        #print(_approx.unsqueeze(-1).shape)
+        batch_size = _row.shape[0]
+        #print(_S.unsqueeze(1).unsqueeze(1).expand(batch_size, self.rank, 1, self.rank).shape)
+        _approx = torch.matmul(_approx.unsqueeze(-1), _S.unsqueeze(1).unsqueeze(1).expand(batch_size, self.rank, 1, self.rank))    #  batch size x rank x rank x rank
+        _approx = torch.sum(_approx * self.G.unsqueeze(0), (1, 2, 3))    # batch size        
+        return _approx
+    
+    
+    def L2_loss_tucker(self, batch_loss_zero, batch_loss_nz):        
+        with torch.no_grad():
+            input_U = self.centroids[self.mapping] * self.U_mask
+
+            # compute zero terms        
+            VtV = torch.mm(self.V.t(), self.V)   # rank x rank 
+            StS = torch.matmul(self.S.unsqueeze(-1), self.S.unsqueeze(1))  # k x rank x rank
+            mat_G = self.G.reshape(self.rank, self.rank**2)   # rank x rank^2
+
+            num_kron_entry = self.tensor.k * self.rank**6              
+            sq_loss = 0       
+            for i in tqdm(range(0, self.tensor.k, batch_loss_zero)):
+                curr_num_k = min(self.tensor.k - i, batch_loss_zero)
+                UG = torch.bmm(input_U[i:i+curr_num_k, :, :], mat_G.repeat(curr_num_k, 1, 1))   # batch size x i_max x rank^2          
+                middle_mat = batch_kron(VtV.repeat(curr_num_k, 1, 1), StS[i:i+curr_num_k, :, :])   # batch size x rank^2 x rank^2
+                middle_mat = torch.bmm(UG, middle_mat)   # batch size x i_max x rank^2
+                sq_loss = sq_loss + torch.sum(middle_mat * UG)  # batch size
+
+            del UG, middle_mat, VtV, StS
+            gc.collect()
+            torch.cuda.empty_cache()                
+            # Correct non-zero terms
+
+            for i in tqdm(range(0, self.tensor.num_nnz, batch_loss_nz)):
+                curr_batch_size = min(self.tensor.num_nnz - i, batch_loss_nz)                
+                # Prepare matrices
+                _row = self.tensor.rows[i:i+curr_batch_size].to(self.device)
+                _col = self.tensor.cols[i:i+curr_batch_size].to(self.device)
+                _height = self.tensor.heights[i:i+curr_batch_size].to(self.device)
+                _vals = self.tensor.vals[i:i+curr_batch_size].to(self.device)
+
+                _approx = self.compute_irregular_tucker(input_U, _row, _col, _height)
+                curr_loss = torch.sum(torch.square(_approx - _vals)) - torch.sum(torch.square(_approx))                
+                sq_loss = sq_loss + curr_loss
+                
+        return sq_loss        
+        
 #device = torch.device("cuda:0")
 #_tensor = irregular_tensor('../input/23-Irregular-Tensor/cms_sample.npy', device)
 #_parafac2 = parafac2(_tensor, 'parafac2/cms_factor.mat', device)     

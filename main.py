@@ -2,6 +2,7 @@ import argparse
 from parafac2 import parafac2
 from data import irregular_tensor
 import torch
+import gc
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -28,6 +29,16 @@ if __name__ == '__main__':
         "-lr", "--lr", action="store", type=float
     )
     
+    parser.add_argument(
+        "-tbz", "--tucker_batch_lossz",
+        action="store", default=2**21, type=int
+    )
+    
+    parser.add_argument(
+        "-tbn", "--tucker_batch_lossnz",
+        action="store", default=2**21, type=int
+    )
+    
     args = parser.parse_args()    
     device = torch.device("cuda:" + str(args.device))
     _tensor = irregular_tensor(args.tensor_path, device)
@@ -35,3 +46,7 @@ if __name__ == '__main__':
     
     _parafac2 = parafac2(_tensor, device, args)
     _parafac2.quantization(args)
+    _parafac2.init_tucker(args)
+    
+    gc.collect()
+    torch.cuda.empty_cache()       
