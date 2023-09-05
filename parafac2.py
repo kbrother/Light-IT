@@ -133,9 +133,12 @@ class parafac2:
     '''
     def init_tucker(self, args):
         self.mapping = self.clustering()  # k x i_max
+        self.mapping_mask = torch.zeros(self.tensor.k, self.tensor.i_max, dtype=torch.bool, device=self.device)   # k x i_max
+        for _k in range(self.tensor.k):        
+            self.mapping_mask[_k, :self.tensor.i[_k]] = True
         self.G = torch.zeros(self.rank, self.rank, self.rank, device=self.device, dtype=torch.double)
         idx_list = list(range(self.rank))
-        self.G[idx_list, idx_list, idx_list] = 1                    
+        self.G[idx_list, idx_list, idx_list] = 1                     
         
         
     '''
@@ -194,30 +197,54 @@ class parafac2:
         return sq_loss        
         
     
-    def als_U(self, args):
-        with torch.no_grad():
-            W = torch.zeros(self.tensor.i_max, self.rank**2, dtype=torch.double, device=self.device)   # i_max x rank^2
-            for i in range(0, self.tensor.k, args.tucker_batch_u):   
-                # declare tensor
+    def als_U(self, args):    
+        with torch.no_grad():                    
+            first_mat = torch.zeros(self.tensor.i_max, self.rank, device=self.device, dtype=torch.double)   # i_max x rank
+            second_mat = torch.zeros(self.tensor.i_max, self.rank, self.rank, device=self.device, dtype=torch.double)    # i_max x rank x rank
+            curr_G = torch.reshape(self.G, (self.rank, -1))   # rank x rank^2
+            VtV = torch.mm(self.V.data.t(), self.V.data)   # R x R     
+
+            for i in range(0, self.tensor.k, args.tucker_batch_u):
                 curr_batch_size = min(args.tucker_batch_u, self.tensor.k - i)
+                # declare tensor
+                # Build tensor
                 curr_rows = list(itertools.chain.from_iterable(self.tensor.rows_list[i: i+curr_batch_size]))
                 curr_cols = list(itertools.chain.from_iterable(self.tensor.cols_list[i: i+curr_batch_size]))
                 curr_heights = list(itertools.chain.from_iterable(self.tensor.heights_list[i: i+curr_batch_size]))
                 curr_heights = [_h - i for _h in curr_heights]
-                curr_vals = list(itertools.chain.from_iterable(self.tensor.vals_list[i: i+curr_batch_size]))                
-                curr_tensor = torch.sparse_coo_tensor([curr_heights, curr_rows, curr_cols], curr_vals, (curr_batch_size, self.tensor.i_max, self.tensor.j), device=self.device, dtype=torch.double)  # batch size x i_max x j
+                curr_vals = list(itertools.chain.from_iterable(self.tensor.vals_list[i: i+curr_batch_size]))       
+                      
+                curr_tensor = torch.sparse_coo_tensor([ curr_heights, curr_rows, curr_cols], curr_vals, (curr_batch_size, self.tensor.i_max, self.tensor.j), device=self.device, dtype=torch.double)  # batch size x i_max x j
                 
-                VS = batch_kron(self.V.repeat(curr_batch_size, 1, 1), self.S[i:i+curr_batch_size, :].unsqueeze(1))   # batch size x J x rank^2
-                XVS = torch.bmm(curr_tensor, VS)   # batch size x i_max x rank^2
-                curr_mapping = self.mapping[i:i+curr_batch_size, :]    # batch size x i_max
-                curr_mapping = curr_mapping.unsqueeze(-1).expand(curr_batch_size, self.tensor.i_max, self.rank**2)   # batch size x i_max x rank^2
+                # common features
+                curr_mapping = self.mapping[i:i+curr_batch_size, :]   # batch size x i_max
+                curr_mapping_mask = self.mapping_mask[i:i+curr_batch_size, :]   # batch size x i_max                
 
-                temp_W = torch.zeros(curr_batch_size, self.tensor.i_max, self.rank**2, dtype=torch.double, device=self.device)    # batch size x i_max x rank^2
-                temp_W = temp_W.scatter_add_(1, curr_mapping, XVS)     # batch size x i_max x rank^2
-                W = W + torch.sum(temp_W, dim=0)
-            
-            self.centroids, _, _ = torch.linalg.svd(W, full_matrices=False)
-            self.centroids = self.centroids[:, :self.rank]
+                # handle the first mat
+                curr_S = self.S.data[i:i+curr_batch_size, :].unsqueeze(1)   # batch size x 1 x rank                
+                VS = batch_kron(self.V.data.repeat(curr_batch_size, 1, 1), curr_S)   # batch size x J X rank^2
+                VSG = torch.bmm(VS, curr_G.t().repeat(curr_batch_size, 1, 1))    # batch size x J x rank
+                XVSG = torch.bmm(curr_tensor, VSG)   # batch size x i_max x rank
+                temp_mapping = curr_mapping.unsqueeze(-1).expand(-1, -1, self.rank)   # batch size x i_max x rank
+                temp_first_mat = torch.zeros(curr_batch_size, self.tensor.i_max, self.rank, device=self.device, dtype=torch.double)    # batch size x i_max x rank
+                temp_first_mat = temp_first_mat.scatter_add_(1, temp_mapping, XVSG)     # batch size x i_max x rank
+                first_mat = first_mat + torch.sum(temp_first_mat, dim=0)
+                
+                # handle the second mat
+                SS = torch.bmm(torch.transpose(curr_S, 1, 2), curr_S)    # batch size x rank x rank 
+                V2S2 = batch_kron(VtV.repeat(curr_batch_size, 1, 1), SS)   # batch size x rank^2 x rank^2
+                GV2S2 = torch.bmm(curr_G.repeat(curr_batch_size, 1, 1), V2S2)  # batch size x rank x rank^2
+                GV2S2G = torch.bmm(GV2S2, curr_G.t().repeat(curr_batch_size, 1, 1))  # batch size x rank x rank                
+                GV2S2G = GV2S2G.unsqueeze(1).expand(-1, self.tensor.i_max, -1, -1)   # batch size x i_max x rank x rank          
+                GV2S2G = torch.reshape(GV2S2G[curr_mapping_mask, :, :], (-1, self.rank, self.rank))   # small batch x rank x rank                
+                
+                curr_mapping = curr_mapping[curr_mapping_mask]  # small batch
+                red_batch_size = curr_mapping.shape[0]
+                temp_second_mat = torch.zeros(self.tensor.i_max, self.rank, self.rank, device=self.device, dtype=torch.double)   # i_max x rank x rank
+                temp_second_mat = temp_second_mat.index_add_(0, curr_mapping, GV2S2G)   # i_max x rank x rank
+                second_mat = second_mat + temp_second_mat
+                
+            self.centroids.data = torch.bmm(first_mat.unsqueeze(1), torch.linalg.pinv(second_mat)).squeeze()              
             
             
     def hooi_V(self, args):
@@ -311,8 +338,8 @@ class parafac2:
         for e in range(args.epoch_als):
             self.als_G(args)
             print(f'epoch: {e+1}, after G:{self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)}')
-            #self.hooi_U(args)
-            #print(f'epoch: {e+1}, after u:{self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)}')
+            self.als_U(args)
+            print(f'epoch: {e+1}, after u:{self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)}')
             #self.hooi_V(args)
             #print(f'epoch: {e+1}, after v:{self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)}')
             #self.hooi_S(args)

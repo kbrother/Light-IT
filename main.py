@@ -27,7 +27,7 @@ if __name__ == '__main__':
     
     parser.add_argument(
         "-eh", "--epoch_als",
-        action="store", type=int, default=1
+        action="store", type=int, default=10
     )
     
     parser.add_argument(
