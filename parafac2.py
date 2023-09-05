@@ -5,6 +5,7 @@ import torch
 from tqdm import tqdm
 import numpy as np
 import gc
+import itertools
 
 # input1: k x row1 x col1
 # input2: k x row2 x col2
@@ -49,7 +50,9 @@ class parafac2:
             print(f'square loss: {self.L2_loss(args.batch_size, self.U)}')
         
         
-                    
+    '''
+        input_U: k x i_max x rank
+    '''
     def L2_loss(self, batch_size, input_U):        
         # V * sigma * H^T
         temp_tensor = self.V.repeat(self.tensor.k, 1, 1)  # k x F x rank
@@ -132,28 +135,7 @@ class parafac2:
         self.mapping = self.clustering()  # k x i_max
         self.G = torch.zeros(self.rank, self.rank, self.rank, device=self.device, dtype=torch.double)
         idx_list = list(range(self.rank))
-        self.G[idx_list, idx_list, idx_list] = 1        
-    
-        # SVD
-        Uu, Us, Uv = torch.linalg.svd(self.centroids.data, full_matrices=False)        
-        Vu, Vs, Vv = torch.linalg.svd(self.V.data, full_matrices=False)
-        Su, Ss, Sv = torch.linalg.svd(self.S.data, full_matrices=False)        
-        Usv = torch.diag(Us) @ Uv   # rank x rank
-        Vsv = torch.diag(Vs) @ Vv   # rank x rank
-        Ssv = torch.diag(Ss) @ Sv   # rank x rank
-        
-        # mode matrix product
-        self.centroids = Uu   # I_max x rank
-        self.G = torch.bmm(Usv.repeat(self.rank, 1, 1), torch.permute(self.G, (2, 0, 1)))
-        self.G = torch.permute(self.G, (1, 2, 0))        
-        
-        self.V = Vu  # J x rank
-        self.G = torch.bmm(Vsv.repeat(self.rank, 1, 1), self.G)
-        
-        self.S = Su  # K x rank
-        self.G = torch.bmm(Ssv.repeat(self.rank, 1, 1), torch.permute(self.G, (0, 2, 1)))
-        self.G = torch.permute(self.G, (0, 2, 1))        
-        print(f'loss after loaded:{self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)}')
+        self.G[idx_list, idx_list, idx_list] = 1                    
         
         
     '''
@@ -185,7 +167,7 @@ class parafac2:
 
             num_kron_entry = self.tensor.k * self.rank**6              
             sq_loss = 0       
-            for i in tqdm(range(0, self.tensor.k, batch_loss_zero)):
+            for i in range(0, self.tensor.k, batch_loss_zero):
                 curr_num_k = min(self.tensor.k - i, batch_loss_zero)
                 UG = torch.bmm(input_U[i:i+curr_num_k, :, :], mat_G.repeat(curr_num_k, 1, 1))   # batch size x i_max x rank^2          
                 middle_mat = batch_kron(VtV.repeat(curr_num_k, 1, 1), StS[i:i+curr_num_k, :, :])   # batch size x rank^2 x rank^2
@@ -197,7 +179,7 @@ class parafac2:
             torch.cuda.empty_cache()                
             # Correct non-zero terms
 
-            for i in tqdm(range(0, self.tensor.num_nnz, batch_loss_nz)):
+            for i in range(0, self.tensor.num_nnz, batch_loss_nz):
                 curr_batch_size = min(self.tensor.num_nnz - i, batch_loss_nz)                
                 # Prepare matrices
                 _row = self.tensor.rows[i:i+curr_batch_size].to(self.device)
@@ -211,6 +193,129 @@ class parafac2:
                 
         return sq_loss        
         
-#device = torch.device("cuda:0")
-#_tensor = irregular_tensor('../input/23-Irregular-Tensor/cms_sample.npy', device)
-#_parafac2 = parafac2(_tensor, 'parafac2/cms_factor.mat', device)     
+    
+    def als_U(self, args):
+        with torch.no_grad():
+            W = torch.zeros(self.tensor.i_max, self.rank**2, dtype=torch.double, device=self.device)   # i_max x rank^2
+            for i in range(0, self.tensor.k, args.tucker_batch_u):   
+                # declare tensor
+                curr_batch_size = min(args.tucker_batch_u, self.tensor.k - i)
+                curr_rows = list(itertools.chain.from_iterable(self.tensor.rows_list[i: i+curr_batch_size]))
+                curr_cols = list(itertools.chain.from_iterable(self.tensor.cols_list[i: i+curr_batch_size]))
+                curr_heights = list(itertools.chain.from_iterable(self.tensor.heights_list[i: i+curr_batch_size]))
+                curr_heights = [_h - i for _h in curr_heights]
+                curr_vals = list(itertools.chain.from_iterable(self.tensor.vals_list[i: i+curr_batch_size]))                
+                curr_tensor = torch.sparse_coo_tensor([curr_heights, curr_rows, curr_cols], curr_vals, (curr_batch_size, self.tensor.i_max, self.tensor.j), device=self.device, dtype=torch.double)  # batch size x i_max x j
+                
+                VS = batch_kron(self.V.repeat(curr_batch_size, 1, 1), self.S[i:i+curr_batch_size, :].unsqueeze(1))   # batch size x J x rank^2
+                XVS = torch.bmm(curr_tensor, VS)   # batch size x i_max x rank^2
+                curr_mapping = self.mapping[i:i+curr_batch_size, :]    # batch size x i_max
+                curr_mapping = curr_mapping.unsqueeze(-1).expand(curr_batch_size, self.tensor.i_max, self.rank**2)   # batch size x i_max x rank^2
+
+                temp_W = torch.zeros(curr_batch_size, self.tensor.i_max, self.rank**2, dtype=torch.double, device=self.device)    # batch size x i_max x rank^2
+                temp_W = temp_W.scatter_add_(1, curr_mapping, XVS)     # batch size x i_max x rank^2
+                W = W + torch.sum(temp_W, dim=0)
+            
+            self.centroids, _, _ = torch.linalg.svd(W, full_matrices=False)
+            self.centroids = self.centroids[:, :self.rank]
+            
+            
+    def hooi_V(self, args):
+        with torch.no_grad():
+            W = torch.zeros(self.tensor.j, self.rank**2, dytpe=torch.double, device=self.device)    # j x rank^2
+            for i in range(0, self.tensor.k, args.tucker_batch_v):   
+                # declare tensor
+                curr_batch_size = min(args.tucker_batch_v, self.tensor.k - i)
+                curr_rows = list(itertools.chain.from_iterable(self.tensor.rows_list[i: i+curr_batch_size]))
+                curr_cols = list(itertools.chain.from_iterable(self.tensor.cols_list[i: i+curr_batch_size]))
+                curr_heights = list(itertools.chain.from_iterable(self.tensor.heights_list[i: i+curr_batch_size]))
+                curr_heights = [_h - i for _h in curr_heights]
+                curr_vals = list(itertools.chain.from_iterable(self.tensor.vals_list[i: i+curr_batch_size]))                
+                curr_tensor = torch.sparse_coo_tensor([curr_heights, curr_cols, curr_rows], curr_vals, (curr_batch_size, self.tensor.j, self.tensor.i_max), device=self.device, dtype=torch.double)  # batch size x j x i_max
+                
+                curr_mapping = self.mapping[i:i+curr_batch_size, :]   # batch size x i_max
+                curr_U = self.centroids[curr_mapping] * self.U_mask[i:i + curr_batch_size,:,:]   # batch size x i_max x rank
+                US = batch_kron(curr_U, self.S[i:i+curr_batch_size, :].unsqueeze(1))    # batch size x i_max x rank^2
+                XUS = torch.bmm(curr_tensor, US)   # batch size x j x rank^2
+                W = W + torch.sum(XUS, dim=0)
+         
+            self.V, _, _ = torch.linalg.svd(W, full_matrices=False)
+            self.V = self.V[:,:self.rank]
+     
+    
+    def hooi_S(self, args):
+        with torch.no_grad():
+            W = torch.zeros(self.tensor.k, self.rank**2, dytpe=torch.double, device=self.device)  
+            for i in range(0, self.tensor.k, args.tucker_batch_s):
+                # declare tensor
+                curr_batch_size = min(args.tucker_batch_s, self.tensor.k - i)
+                curr_rows = list(itertools.chain.from_iterable(self.tensor.rows_list[i: i+curr_batch_size]))
+                curr_cols = list(itertools.chain.from_iterable(self.tensor.cols_list[i: i+curr_batch_size]))
+                curr_heights = list(itertools.chain.from_iterable(self.tensor.heights_list[i: i+curr_batch_size]))
+                curr_heights = [_h - i for _h in curr_heights]               
+                curr_idx = [curr_rows[i]*self.tensor.j + curr_cols[i] for i in range(len(curr_rows))]
+                curr_vals = list(itertools.chain.from_iterable(self.tensor.vals_list[i: i+curr_batch_size]))                
+                curr_tensor = torch.sparse_coo_tensor([curr_heights, curr_idx], curr_vals, (curr_batch_size, self.tensor.j*self.tensor.i_max), device=self.device, dtype=torch.double)  # batch size x j*i_max
+                curr_tensor = curr_tensor.unsqueeze(1)
+                
+                curr_mapping = self.mapping[i:i+curr_batch_size, :]   # batch size x i_max
+                curr_U = self.centroids[curr_mapping] * self.U_mask[i:i + curr_batch_size,:,:]   # batch size x i_max x rank
+                UV = batch_kron(curr_U, self.V)    # batch size x i_max*J x rank^2
+                XUV = torch.bmm(curr_tensor, UV).squeeze()    # batch size x rank^2
+                W[i:i+curr_batch_size, :] = XUV
+            
+            self.S, _, _ = torch.linalg.svd(W, full_matrices=False)
+            self.S = self.S[:,:self.rank]            
+        
+        
+    def als_G(self, args):
+        with torch.no_grad():            
+            VtV = torch.mm(self.V.data.t(), self.V.data)   # R x R         
+            first_mat = torch.linalg.pinv(VtV)   # Rx R
+            second_mat, third_mat = 0, 0           
+            for i in range(0, self.tensor.k, args.tucker_batch_g):
+                curr_batch_size = min(args.tucker_batch_g, self.tensor.k - i)
+                # Build tensor
+                curr_rows = list(itertools.chain.from_iterable(self.tensor.rows_list[i: i+curr_batch_size]))
+                curr_cols = list(itertools.chain.from_iterable(self.tensor.cols_list[i: i+curr_batch_size]))
+                curr_heights = list(itertools.chain.from_iterable(self.tensor.heights_list[i: i+curr_batch_size]))
+                curr_heights = [_h - i for _h in curr_heights]
+                curr_vals = list(itertools.chain.from_iterable(self.tensor.vals_list[i: i+curr_batch_size]))       
+                      
+                curr_tensor = torch.sparse_coo_tensor([curr_heights, curr_cols, curr_rows], curr_vals, (curr_batch_size, self.tensor.j, self.tensor.i_max), device=self.device, dtype=torch.double)  # batch size x j x i_max
+                
+                # second mat
+                curr_mapping = self.mapping[i:i+curr_batch_size, :]   # batch size x i_max
+                curr_U = self.centroids.data[curr_mapping] * self.U_mask[i:i+curr_batch_size, :, :]   # batch size x i_max x R
+                curr_S = self.S.data[i:i+curr_batch_size, :].unsqueeze(1)   # batch size x 1 x R
+                US = batch_kron(curr_U, curr_S)   # batch size x i_max x R^2
+                XUS = torch.bmm(curr_tensor, US)   # batch size x j x R^2
+                second_mat = second_mat + torch.sum(XUS, dim=0)   # j x R^2
+                
+                # third mat
+                UtU = torch.bmm(torch.transpose(curr_U, 1, 2), curr_U)  # batch size x R x R
+                StS = torch.bmm(torch.transpose(curr_S, 1, 2), curr_S)  # batch size x R x R
+                third_mat = third_mat + torch.sum(batch_kron(UtU, StS), dim=0)  # R^2 x R^2
+            
+            second_mat = torch.mm(self.V.data.t(), second_mat)  # R x R^2
+            third_mat = torch.linalg.pinv(third_mat)   # R^2 x R^2
+            self.G.data = torch.mm(first_mat, torch.mm(second_mat, third_mat))               
+            self.G.data = torch.reshape(self.G.data, (self.rank, self.rank, self.rank))
+            self.G.data = torch.permute(self.G.data, (1, 0, 2))
+            
+    
+    def als(self, args):
+        self.init_tucker(args)
+        print(f'loss after loaded:{self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)}')
+        
+        for e in range(args.epoch_als):
+            self.als_G(args)
+            print(f'epoch: {e+1}, after G:{self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)}')
+            #self.hooi_U(args)
+            #print(f'epoch: {e+1}, after u:{self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)}')
+            #self.hooi_V(args)
+            #print(f'epoch: {e+1}, after v:{self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)}')
+            #self.hooi_S(args)
+            #print(f'epoch: {e+1}, after s:{self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)}') 
+            
+        

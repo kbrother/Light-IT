@@ -26,6 +26,11 @@ if __name__ == '__main__':
     )
     
     parser.add_argument(
+        "-eh", "--epoch_als",
+        action="store", type=int, default=1
+    )
+    
+    parser.add_argument(
         "-lr", "--lr", action="store", type=float
     )
     
@@ -39,6 +44,26 @@ if __name__ == '__main__':
         action="store", default=2**21, type=int
     )
     
+    parser.add_argument(
+        "-tbu", "--tucker_batch_u",
+        action="store", default=2**21, type=int
+    )
+        
+    parser.add_argument(
+        "-tbv", "--tucker_batch_v",
+        action="store", default=2**21, type=int
+    )
+    
+    parser.add_argument(
+        "-tbs", "--tucker_batch_s",
+        action="store", default=2**21, type=int
+    )
+    
+    parser.add_argument(
+        "-tbg", "--tucker_batch_g",
+        action="store", default=2**21, type=int
+    )
+    
     args = parser.parse_args()    
     device = torch.device("cuda:" + str(args.device))
     _tensor = irregular_tensor(args.tensor_path, device)
@@ -46,7 +71,4 @@ if __name__ == '__main__':
     
     _parafac2 = parafac2(_tensor, device, args)
     _parafac2.quantization(args)
-    _parafac2.init_tucker(args)
-    
-    gc.collect()
-    torch.cuda.empty_cache()       
+    _parafac2.als(args)

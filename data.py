@@ -13,26 +13,26 @@ class irregular_tensor:
         self.i_max = np.max(self.i)
                         
         # upload data to gpu
-        self.rows, self.cols, self.heights, self.vals = [], [], [], []
+        self.rows_list, self.cols_list, self.heights_list, self.vals_list = [], [], [], []
         self.num_nnz = 0
         for _k in range(self.k):
             _rows, _cols = self.src_tensor[_k].nonzero()
             _vals = self.src_tensor[_k][_rows, _cols]
             if _vals.size > 1:
                 _vals = np.asarray(_vals).squeeze()                          
-            self.rows.append(_rows.tolist())            
-            self.cols.append(_cols.tolist())
+            self.rows_list.append(_rows.tolist())            
+            self.cols_list.append(_cols.tolist())
             if _vals.size == 1:                
-                self.vals.append([_vals[0]])
+                self.vals_list.append([float(_vals)])
             else:
-                self.vals.append(_vals.tolist())
-            self.heights.append([_k] * _rows.size)  
+                self.vals_list.append(_vals.tolist())
+            self.heights_list.append([_k] * _rows.size)  
             self.num_nnz += self.src_tensor[_k].count_nonzero()
             
-        self.rows = list(itertools.chain.from_iterable(self.rows))
-        self.cols = list(itertools.chain.from_iterable(self.cols))
-        self.heights = list(itertools.chain.from_iterable(self.heights))
-        self.vals = list(itertools.chain.from_iterable(self.vals))
+        self.rows = list(itertools.chain.from_iterable(self.rows_list))
+        self.cols = list(itertools.chain.from_iterable(self.cols_list))
+        self.heights = list(itertools.chain.from_iterable(self.heights_list))
+        self.vals = list(itertools.chain.from_iterable(self.vals_list))
         
         self.rows = torch.tensor(self.rows, device=device, dtype=torch.long)
         self.cols = torch.tensor(self.cols, device=device, dtype=torch.long)    
