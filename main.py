@@ -27,7 +27,7 @@ if __name__ == '__main__':
     
     parser.add_argument(
         "-eh", "--epoch_als",
-        action="store", type=int, default=10
+        action="store", type=int, default=500
     )
     
     parser.add_argument(
@@ -36,32 +36,32 @@ if __name__ == '__main__':
     
     parser.add_argument(
         "-tbz", "--tucker_batch_lossz",
-        action="store", default=2**21, type=int
+        action="store", default=2**6, type=int
     )
     
     parser.add_argument(
         "-tbn", "--tucker_batch_lossnz",
-        action="store", default=2**21, type=int
+        action="store", default=2**13, type=int
     )
     
     parser.add_argument(
         "-tbu", "--tucker_batch_u",
-        action="store", default=2**21, type=int
+        action="store", default=2**6, type=int
     )
         
     parser.add_argument(
         "-tbv", "--tucker_batch_v",
-        action="store", default=2**21, type=int
+        action="store", default=2**6, type=int
     )
     
     parser.add_argument(
         "-tbs", "--tucker_batch_s",
-        action="store", default=2**21, type=int
+        action="store", default=2**6, type=int
     )
     
     parser.add_argument(
         "-tbg", "--tucker_batch_g",
-        action="store", default=2**21, type=int
+        action="store", default=2**6, type=int
     )
     
     args = parser.parse_args()    
@@ -69,6 +69,8 @@ if __name__ == '__main__':
     _tensor = irregular_tensor(args.tensor_path, device)
     print("load finish")
     
-    _parafac2 = parafac2(_tensor, device, args)
+    _parafac2 = parafac2(_tensor, device, args)    
     _parafac2.quantization(args)
+    gc.collect()
+    torch.cuda.empty_cache()    
     _parafac2.als(args)
