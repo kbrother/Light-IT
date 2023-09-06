@@ -128,7 +128,7 @@ class parafac2:
                         f.write(f'epoch: {_epoch}, l2 loss: {_loss}, fitness: {_fitness}\n')
                        
                     if _fitness > max_fitness:
-                        _fitness = max_fitness
+                        max_fitness = _fitness
                         final_U = self.U.data.clone().detach().cpu()
                         final_cents = self.centroids.data.clone().detach().cpu()
                         final_V = self.V.data.clone().detach().cpu()
@@ -380,15 +380,14 @@ class parafac2:
             #curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)   
             #print(f'epoch: {e+1}, before s:{curr_fit}')
             self.als_S(args)
-            
-            
+                        
+            gc.collect()
+            torch.cuda.empty_cache()  
             sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
             curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)            
             with open(args.output_path, 'a') as f:
                 f.write(f'als epoch: {e+1}, after s:{curr_fit}')
-            print(f'als epoch: {e+1}, after s:{curr_fit}')
+            print(f'als epoch: {e+1}, after s:{curr_fit}\n')
             
-            gc.collect()
-            torch.cuda.empty_cache()  
             if curr_fit - prev_fit < 1e-5: break
             prev_fit = curr_fit

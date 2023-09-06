@@ -41,7 +41,7 @@ if __name__ == '__main__':
     
     parser.add_argument(
         "-tbn", "--tucker_batch_lossnz",
-        action="store", default=2**13, type=int
+        action="store", default=2**11, type=int
     )
     
     parser.add_argument(
