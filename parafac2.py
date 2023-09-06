@@ -386,8 +386,8 @@ class parafac2:
             sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
             curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)            
             with open(args.output_path, 'a') as f:
-                f.write(f'als epoch: {e+1}, after s:{curr_fit}')
+                f.write(f'als epoch: {e+1}, after s:{curr_fit}\n')
             print(f'als epoch: {e+1}, after s:{curr_fit}\n')
             
-            if curr_fit - prev_fit < 1e-5: break
+            if curr_fit - prev_fit < 1e-4: break
             prev_fit = curr_fit
