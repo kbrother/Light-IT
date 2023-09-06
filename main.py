@@ -17,7 +17,7 @@ if __name__ == '__main__':
     
     parser.add_argument(
         "-b", "--batch_size",
-        action="store", default=2**21, type=int
+        action="store", default=2**15, type=int
     )
     
     parser.add_argument(
@@ -46,7 +46,7 @@ if __name__ == '__main__':
     
     parser.add_argument(
         "-tbu", "--tucker_batch_u",
-        action="store", default=2**6, type=int
+        action="store", default=2**5, type=int
     )
         
     parser.add_argument(
