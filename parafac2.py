@@ -50,15 +50,15 @@ class parafac2:
             print(f'fitness: {1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)}') 
             print(f'square loss: {sq_loss}')
         
-        
+
     '''
         input_U: k x i_max x rank
     '''
     def L2_loss(self, is_train, batch_size, input_U):        
         # V * sigma * H^T
         # Correct non-zero terms
-        _loss = 0
-        for i in tqdm(range(0, self.tensor.k, batch_size//self.tensor.k)):
+        _loss = 0        
+        for i in range(0, self.tensor.k, batch_size//self.tensor.k):
             curr_batch_size = min(batch_size//self.tensor.k, self.tensor.k - i)
             curr_V = self.V.repeat(curr_batch_size, 1, 1)  # k x j x rank
             VS = curr_V * self.S[i:i+curr_batch_size, :].unsqueeze(1)   # k x j x rank        
@@ -70,7 +70,8 @@ class parafac2:
             temp_tensor = torch.matmul(curr_U, temp_tensor)    # k x i_max x rank
             sq_sum = torch.sum(temp_tensor * curr_U)   # k x i_max x rank
             if is_train: sq_sum.backward()
-            _loss += sq_sum.item()
+            _loss += sq_sum.item()              
+        
         
         # Correct non-zero terms        
         for i in range(0, self.tensor.num_nnz, batch_size):
@@ -122,17 +123,19 @@ class parafac2:
             # Clustering     
             U_clustered = self.centroids[self.clustering()]    # k x i_max x rank
             U_clustered = U_clustered * self.U_mask
+            self.U = self.U * self.U_mask
             sg_part = (self.U - U_clustered).detach()
-            U_tricked = self.U - sg_part # refer to paper   # k x i_max x rank
-            _loss = self.L2_loss(True, args.batch_size, U_tricked) + torch.sum(torch.square(U_clustered - self.U.detach()))
-            #_loss.backward()
+            U_tricked = self.U - sg_part # refer to paper   # k x i_max x rank            
+            self.L2_loss(True, args.batch_size, U_tricked) 
+            cluster_loss = torch.sum(torch.square(U_clustered - self.U.detach()))            
+            cluster_loss.backward()
             optimizer.step()
             
             if (_epoch + 1) % 10 == 0:
                 with torch.no_grad():
                     U_clustered = self.centroids[self.clustering()]    # k x i_max x rank
                     U_clustered = U_clustered * self.U_mask
-                    _loss = self.L2_loss(False, args.batch_size, U_clustered)
+                    _loss = self.L2_loss(False, args.batch_size, U_clustered)              
                     _fitness = 1 - math.sqrt(_loss)/math.sqrt(self.tensor.sq_sum)
                     print(f'epoch: {_epoch}, l2 loss: {_loss}, fitness: {_fitness}')
                     with open(args.output_path + ".txt", 'a') as f:
@@ -149,7 +152,8 @@ class parafac2:
         self.U.data.copy_(final_U.to(self.device))
         self.V.data.copy_(final_V.to(self.device))
         self.S.data.copy_(final_S.to(self.device))
-                        
+                   
+            
     '''
         Use svd to initialize tucker decomposition
     '''

@@ -61,6 +61,7 @@ def huffman_encoding(_tensor, cluster_result):
                                     
     return num_bits
     
+# python huffman.py -tp ../data/23-Irregular-Tensor/ml-1m.npy -rp results/ml-1m-rank10.pt
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-tp', "--tensor_path", type=str)    
@@ -71,5 +72,5 @@ if __name__ == '__main__':
     result_dict = torch.load(args.result_path)
     print("load finish")
     
-    cluster_result = result_dict['cluster_result'].cpu()  # k x i_max
-    print(f'num bytes: {huffman_encoding(_tensor, cluster_result)/8}')
+    cluster_result = result_dict['mapping'].cpu()  # k x i_max
+    print(f'num params: {huffman_encoding(_tensor, cluster_result)/64}')
