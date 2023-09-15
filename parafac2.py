@@ -23,26 +23,73 @@ def batch_kron(input1, input2):
 
 class parafac2:
     
+    def init_factor(self, batch_size):
+        with torch.no_grad():
+            _H = torch.rand((self.rank, self.rank), device=self.device, dtype=torch.double)
+            for i in tqdm(range(0, self.tensor.k, batch_size)):
+                curr_batch_size = min(batch_size, self.tensor.k - i)        
+                # build tensor
+                curr_rows = list(itertools.chain.from_iterable(self.tensor.rows_list[i: i+curr_batch_size]))
+                curr_cols = list(itertools.chain.from_iterable(self.tensor.cols_list[i: i+curr_batch_size]))
+                curr_heights = list(itertools.chain.from_iterable(self.tensor.heights_list[i: i+curr_batch_size]))
+                curr_heights = [_h - i for _h in curr_heights]
+                curr_vals = list(itertools.chain.from_iterable(self.tensor.vals_list[i: i+curr_batch_size]))                
+                curr_tensor = torch.sparse_coo_tensor([curr_heights, curr_rows, curr_cols], curr_vals, (curr_batch_size, self.tensor.i_max, self.tensor.j), device=self.device, dtype=torch.double)  # batch size x i_max x j
+                
+                # compute SVD
+                XV = torch.bmm(curr_tensor, self.V.repeat(curr_batch_size, 1, 1))  # batch size x i_max x R
+                XVS = XV * self.S[i:i+curr_batch_size, :].unsqueeze(1)   # batch size x i_max x R
+                XVSH = torch.bmm(XVS, _H.repeat(curr_batch_size, 1, 1))   # batc hsize x i_max x R
+                Z, Sigma, Ph = torch.linalg.svd(XVSH, full_matrices=False)  # Z: batch size x i_max x R, Ph: bathc size x R x R
+                self.U[i:i+curr_batch_size, :] = torch.bmm(Z, Ph) # batch size x i_max x rank
+
+            # Normalize entry 
+            _lambda = torch.sum(torch.square(_H), dim=0)  # R
+            _H = _H / _lambda.unsqueeze(0)
+            _lambda = _lambda * torch.sum(torch.square(self.V), dim=0)
+            self.V = self.V / torch.sum(torch.square(self.V), dim=0).unsqueeze(0)
+            _lambda = _lambda * torch.sum(torch.square(self.V), dim=0)
+            self.S = self.S / torch.sum(torch.square(self.S), dim=0).unsqueeze(0)
+            
+            _lambda = torch.pow(_lambda, 1/3)
+            _H = _H * _lambda.unsqueeze(0)
+            self.V = self.V * _lambda.unsqueeze(0)
+            self.S = self.S * _lambda.unsqueeze(0)
+            
+            # Normalize U
+            self.U = torch.bmm(self.U, _H.repeat(self.tensor.k, 1, 1))
+            
+
     def __init__(self, _tensor, device, args):      
         # Intialization
         self.device = device
         self.tensor = _tensor
-        factor_mat = loadmat(args.factor_path)
-        _U = factor_mat['U'][0, :]
-        self.S, self.V = factor_mat['S'], factor_mat['V']
-        self.rank = self.S.shape[1]        
-                
-        self.U = np.zeros((_tensor.k, _tensor.i_max, self.rank))   # k x i_max x rank
-        self.U_mask = torch.zeros((_tensor.k, _tensor.i_max, self.rank), device=device, dtype=torch.double)   # k x i_max x rank, 1 means the valid area
-        self.centroids = torch.rand((_tensor.i_max, self.rank), device=device, dtype=torch.double)    # cluster centers,  i_max x rank
-        self.centroids = torch.nn.Parameter(self.centroids)
+        self.U_mask = torch.zeros((_tensor.k, _tensor.i_max, args.rank), device=device, dtype=torch.double)   # k x i_max x rank, 1 means the valid area
         for _k in range(_tensor.k):
-            self.U[_k, :_tensor.i[_k], :] = _U[_k]
             self.U_mask[_k, :_tensor.i[_k], :] = 1
-                        
+
+        if args.factor_path is not None:
+            factor_mat = loadmat(args.factor_path)
+            _U = factor_mat['U'][0, :]
+            self.S, self.V = factor_mat['S'], factor_mat['V']
+            self.rank = self.S.shape[1]        
+
+            self.U = np.zeros((_tensor.k, _tensor.i_max, self.rank))   # k x i_max x rank
+            for _k in range(_tensor.k):
+                self.U[_k, :_tensor.i[_k], :] = _U[_k]                
+            self.U = torch.tensor(self.U, device=device)
+            self.S, self.V = torch.tensor(self.S, device=device), torch.tensor(self.V, device=device)  
+        else:
+            self.rank = args.rank
+            self.U = torch.rand((_tensor.k, _tensor.i_max, self.rank), device=device, dtype=torch.double)  # k x i_max x rank        
+            self.U = self.U * self.U_mask            
+            self.S = torch.rand((_tensor.k, self.rank), device=device, dtype=torch.double)      # k x rank
+            self.V = torch.rand((_tensor.j, self.rank), device=device, dtype=torch.double)   # j x rank            
+            self.init_factor(args.batch_init_factor)
+            
         # Upload to gpu        
-        self.U = torch.tensor(self.U, device=device)
-        self.S, self.V = torch.tensor(self.S, device=device), torch.tensor(self.V, device=device)        
+        self.centroids = torch.rand((_tensor.i_max, self.rank), device=device, dtype=torch.double)    # cluster centers,  i_max x rank
+        self.centroids = torch.nn.Parameter(self.centroids)                      
         self.U = torch.nn.Parameter(self.U)
         self.S, self.V = torch.nn.Parameter(self.S), torch.nn.Parameter(self.V)                
         with torch.no_grad():
@@ -203,9 +250,7 @@ class parafac2:
                 middle_mat = torch.bmm(UG, middle_mat)   # batch size x i_max x rank^2
                 sq_loss = sq_loss + torch.sum(middle_mat * UG)  # batch size
 
-            del UG, middle_mat, VtV, StS
-            gc.collect()
-            torch.cuda.empty_cache()                
+            del UG, middle_mat, VtV, StS                      
             # Correct non-zero terms
 
             for i in tqdm(range(0, self.tensor.num_nnz, batch_loss_nz)):
@@ -396,8 +441,6 @@ class parafac2:
             #print(f'epoch: {e+1}, before s:{curr_fit}')
             self.als_S(args)
                         
-            gc.collect()
-            torch.cuda.empty_cache()  
             sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
             curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)            
             with open(args.output_path + ".txt", 'a') as f:

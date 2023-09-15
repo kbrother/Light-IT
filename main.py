@@ -9,6 +9,7 @@ if __name__ == '__main__':
     parser.add_argument('-tp', "--tensor_path", type=str)
     parser.add_argument('-op', "--output_path", type=str)
     parser.add_argument('-fp', "--factor_path", type=str)
+    parser.add_argument('-r', "--rank", type=int)
     
     parser.add_argument(
         "-de", "--device",
@@ -32,6 +33,11 @@ if __name__ == '__main__':
     
     parser.add_argument(
         "-lr", "--lr", action="store", type=float
+    )
+    
+    parser.add_argument(
+        "-bif", "--batch_init_factor",
+        action="store", default=2**6, type=int
     )
     
     parser.add_argument(
@@ -71,6 +77,6 @@ if __name__ == '__main__':
     
     _parafac2 = parafac2(_tensor, device, args)    
     _parafac2.quantization(args)
-    gc.collect()
-    torch.cuda.empty_cache()    
+    #gc.collect()
+    #torch.cuda.empty_cache()    
     _parafac2.als(args)
