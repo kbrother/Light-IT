@@ -391,15 +391,19 @@ class parafac2:
             mat_G = torch.reshape(torch.transpose(self.G.data, 0, 1), (self.rank, -1))   # R x R^2
             front_mat, end_mat = 0, 0
             for i in tqdm(range(0, self.tensor.k, args.tucker_batch_v)):
-                curr_batch_size = min(args.tucker_batch_v, self.tensor.k - i)                
-                # Build tensor
-                curr_rows = list(itertools.chain.from_iterable(self.tensor.rows_list[i: i+curr_batch_size]))
-                curr_cols = list(itertools.chain.from_iterable(self.tensor.cols_list[i: i+curr_batch_size]))
-                curr_heights = list(itertools.chain.from_iterable(self.tensor.heights_list[i: i+curr_batch_size]))
-                curr_heights = [_h - i for _h in curr_heights]
-                curr_vals = list(itertools.chain.from_iterable(self.tensor.vals_list[i: i+curr_batch_size]))                
-                curr_tensor = torch.sparse_coo_tensor([curr_heights, curr_cols, curr_rows], curr_vals, (curr_batch_size, self.tensor.j, self.tensor.i_max), device=self.device, dtype=torch.double)  # batch size x j x i_max
-                
+                curr_batch_size = min(args.tucker_batch_v, self.tensor.k - i)        
+                if args.is_dense:
+                    curr_tensor = self.set_curr_tensor(curr_batch_size, i)
+                    curr_tensor = torch.transpose(curr_tensor, 1, 2)   # batch size x j x i_max
+                else:                                                
+                    # Build tensor
+                    curr_rows = list(itertools.chain.from_iterable(self.tensor.rows_list[i: i+curr_batch_size]))
+                    curr_cols = list(itertools.chain.from_iterable(self.tensor.cols_list[i: i+curr_batch_size]))
+                    curr_heights = list(itertools.chain.from_iterable(self.tensor.heights_list[i: i+curr_batch_size]))
+                    curr_heights = [_h - i for _h in curr_heights]
+                    curr_vals = list(itertools.chain.from_iterable(self.tensor.vals_list[i: i+curr_batch_size]))                
+                    curr_tensor = torch.sparse_coo_tensor([curr_heights, curr_cols, curr_rows], curr_vals, (curr_batch_size, self.tensor.j, self.tensor.i_max), device=self.device, dtype=torch.double)  # batch size x j x i_max
+
                 # Build front mat
                 curr_mapping = self.mapping[i:i+curr_batch_size, :]   # batch size x i_max
                 curr_U = self.centroids.data[curr_mapping] * self.U_mask[i:i+curr_batch_size, :, :]   # batch size x i_max x R                
@@ -505,12 +509,12 @@ class parafac2:
         print(f'loss after loaded:{prev_fit}')
         
         for e in range(args.epoch_als):
-            self.als_G(args)        
-            self.als_U(args)
+            #self.als_G(args)        
+            #self.als_U(args)
             #self.als_G(args)            
             #self.als_V(args)
-            #self.als_G(args)                   
-            #self.als_S(args)
+            self.als_G(args)                   
+            self.als_S(args)
                         
             if args.is_dense:
                 sq_loss = self.L2_loss_tucker_dense(args.batch_size)

@@ -14,7 +14,6 @@ class irregular_tensor:
         
         self.sq_sum = 0
         if is_dense:
-            print(is_dense)
             for i in range(self.k):
                 self.sq_sum += np.sum(np.square(self.src_tensor[i]))
 
