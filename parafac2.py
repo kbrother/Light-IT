@@ -428,26 +428,35 @@ class parafac2:
             VtV = torch.mm(self.V.data.t(), self.V.data)   # R x R
             for i in tqdm(range(0, self.tensor.k, args.tucker_batch_s)):
                 curr_batch_size = min(args.tucker_batch_s, self.tensor.k - i)
-                # Build tensor
-                curr_rows = list(itertools.chain.from_iterable(self.tensor.rows_list[i: i+curr_batch_size]))
-                curr_cols = list(itertools.chain.from_iterable(self.tensor.cols_list[i: i+curr_batch_size]))
-                curr_idx = [curr_rows[ii]*self.tensor.j + curr_cols[ii] for ii in range(len(curr_rows))]
-                curr_heights = list(itertools.chain.from_iterable(self.tensor.heights_list[i: i+curr_batch_size]))
-                curr_heights = [_h - i for _h in curr_heights]
-                curr_heights = torch.tensor(curr_heights, dtype=torch.long, device=self.device)   # entry
-                curr_vals = list(itertools.chain.from_iterable(self.tensor.vals_list[i: i+curr_batch_size]))      
-                curr_vals = torch.tensor(curr_vals, dtype=torch.double, device=self.device)    # num_entry             
-                    
-                # front mat
-                front_mat = torch.zeros(curr_batch_size, self.rank**2, device=self.device, dtype=torch.double)   # batch size x rank^2      
                 curr_mapping = self.mapping[i:i+curr_batch_size, :]   # batch size x i_max
                 curr_U = self.centroids.data[curr_mapping] * self.U_mask[i:i+curr_batch_size, :, :]   # batch size x i_max x R
-                nnz_U = curr_U[curr_heights, curr_rows, :]     # num_entry x R
-                nnz_V = self.V.data[curr_cols, :]   # num_entry x R
-                UV = batch_kron(nnz_U.unsqueeze(1), nnz_V.unsqueeze(1)).squeeze()   # num_entry x R^2
-                XUV = UV * curr_vals.unsqueeze(1)      # num_entry x R^2
-                front_mat = front_mat.index_add_(0, curr_heights, XUV)   # batch size x rank^2      
-                front_mat = torch.bmm(front_mat.unsqueeze(1), mat_G.t().repeat(curr_batch_size, 1, 1))   # batch size x 1 x rank
+                    
+                if args.is_dense:
+                    curr_tensor = self.set_curr_tensor(curr_batch_size, i)  #  batch size x i_max x j   
+                    curr_tensor = curr_tensor.view(curr_batch_size, -1).unsqueeze(1)    # batch size x 1 x i_max*j
+                    curr_V = self.V.data.unsqueeze(0).repeat(curr_batch_size, 1, 1)  # batch size x j x R
+                    UV = batch_kron(curr_U, curr_V)  # batch size x i_max*j x R^2
+                    XUV = torch.bmm(curr_tensor, UV)   # batch size x 1 x R^2
+                    front_mat = torch.bmm(XUV, mat_G.t().repeat(curr_batch_size, 1, 1))  # batch size x 1 x R
+                else:
+                    # Build tensor
+                    curr_rows = list(itertools.chain.from_iterable(self.tensor.rows_list[i: i+curr_batch_size]))
+                    curr_cols = list(itertools.chain.from_iterable(self.tensor.cols_list[i: i+curr_batch_size]))
+                    curr_idx = [curr_rows[ii]*self.tensor.j + curr_cols[ii] for ii in range(len(curr_rows))]
+                    curr_heights = list(itertools.chain.from_iterable(self.tensor.heights_list[i: i+curr_batch_size]))
+                    curr_heights = [_h - i for _h in curr_heights]
+                    curr_heights = torch.tensor(curr_heights, dtype=torch.long, device=self.device)   # entry
+                    curr_vals = list(itertools.chain.from_iterable(self.tensor.vals_list[i: i+curr_batch_size]))      
+                    curr_vals = torch.tensor(curr_vals, dtype=torch.double, device=self.device)    # num_entry             
+
+                    # front mat
+                    front_mat = torch.zeros(curr_batch_size, self.rank**2, device=self.device, dtype=torch.double)   # batch size x rank^2                          
+                    nnz_U = curr_U[curr_heights, curr_rows, :]     # num_entry x R
+                    nnz_V = self.V.data[curr_cols, :]   # num_entry x R
+                    UV = batch_kron(nnz_U.unsqueeze(1), nnz_V.unsqueeze(1)).squeeze()   # num_entry x R^2
+                    XUV = UV * curr_vals.unsqueeze(1)      # num_entry x R^2
+                    front_mat = front_mat.index_add_(0, curr_heights, XUV)   # batch size x rank^2      
+                    front_mat = torch.bmm(front_mat.unsqueeze(1), mat_G.t().repeat(curr_batch_size, 1, 1))   # batch size x 1 x rank
                     
                 # end mat
                 UtU = torch.bmm(torch.transpose(curr_U, 1, 2), curr_U)   # batch size x R x R
@@ -509,10 +518,10 @@ class parafac2:
         print(f'loss after loaded:{prev_fit}')
         
         for e in range(args.epoch_als):
-            #self.als_G(args)        
-            #self.als_U(args)
-            #self.als_G(args)            
-            #self.als_V(args)
+            self.als_G(args)        
+            self.als_U(args)
+            self.als_G(args)            
+            self.als_V(args)
             self.als_G(args)                   
             self.als_S(args)
                         
