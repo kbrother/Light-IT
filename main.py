@@ -3,6 +3,7 @@ from parafac2 import parafac2
 from data import irregular_tensor
 import torch
 import gc
+import os
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -20,7 +21,7 @@ if __name__ == '__main__':
     
     parser.add_argument(
         "-b", "--batch_size",
-        action="store", default=2**8, type=int
+        action="store", default=2**9, type=int
     )
     
     parser.add_argument(
@@ -89,13 +90,20 @@ if __name__ == '__main__':
     _tensor = irregular_tensor(args.tensor_path, device, args.is_dense)
     print("load finish")
     
-    _parafac2 = parafac2(_tensor, device, args)    
-    
+    _parafac2 = parafac2(_tensor, device, args)        
     if args.action == "train":
-        _parafac2.quantization(args)
+        if os.path.exists(args.output_path + "_cp.pt"):
+            checkpoint = torch.load(args.output_path + "_cp.pt")
+            
+            _parafac2.centroids.data.copy_(checkpoint['centroids'].to(device))
+            _parafac2.U.data.copy_(checkpoint['U'].to(device))
+            _parafac2.V.data.copy_(checkpoint['V'].to(device))
+            _parafac2.S.data.copy_(checkpoint['S'].to(device))
+        else:
+            _parafac2.quantization(args)
         #gc.collect()
         #torch.cuda.empty_cache()    
-        #_parafac2.als(args)
+        _parafac2.als(args)
     elif args.action == "test_loss":
         with torch.no_grad():
             print(f'sparse: {_parafac2.L2_loss(False, args.batch_size, _parafac2.U)}')

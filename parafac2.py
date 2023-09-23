@@ -22,6 +22,12 @@ def batch_kron(input1, input2):
 
 
 class parafac2:
+    def set_curr_tensor(self, curr_batch_size, i):
+        curr_tensor = torch.zeros(curr_batch_size, self.tensor.i_max, self.tensor.j, device=self.device, dtype=torch.double)
+        for j in range(curr_batch_size):
+            curr_tensor[j,:self.tensor.i[i+j],:] = torch.from_numpy(self.tensor.src_tensor[i + j])
+        return curr_tensor
+        
     def init_factor(self, batch_size, is_dense):
         with torch.no_grad():
             _H = torch.rand((self.rank, self.rank), device=self.device, dtype=torch.double)
@@ -29,9 +35,7 @@ class parafac2:
                 curr_batch_size = min(batch_size, self.tensor.k - i)        
                 # build tensor
                 if is_dense:                    
-                    curr_tensor = torch.zeros(curr_batch_size, self.tensor.i_max, self.tensor.j, device=self.device, dtype=torch.double)
-                    for j in range(curr_batch_size):
-                        curr_tensor[j,:self.tensor.i[i+j],:] = torch.from_numpy(self.tensor.src_tensor[i + j])
+                    curr_tensor = self.set_curr_tensor(curr_batch_size, i)
                 else:                    
                     curr_rows = list(itertools.chain.from_iterable(self.tensor.rows_list[i: i+curr_batch_size]))
                     curr_cols = list(itertools.chain.from_iterable(self.tensor.cols_list[i: i+curr_batch_size]))
@@ -109,9 +113,7 @@ class parafac2:
         _loss = 0
         for i in range(0, self.tensor.k, batch_size):
             curr_batch_size = min(batch_size, self.tensor.k - i)
-            curr_tensor = torch.zeros(curr_batch_size, self.tensor.i_max, self.tensor.j, device=self.device, dtype=torch.double)
-            for j in range(curr_batch_size):
-                curr_tensor[j,:self.tensor.i[i+j],:] = torch.from_numpy(self.tensor.src_tensor[i + j])            
+            curr_tensor = self.set_curr_tensor(curr_batch_size, i)      
             curr_U = input_U[i:i+curr_batch_size, :, :].unsqueeze(2).expand(-1, -1, self.tensor.j, -1)  # batch size x i_max x J x R
             curr_V = self.V.unsqueeze(0).unsqueeze(0).expand(curr_batch_size, self.tensor.i_max, -1, -1)   # batch size x i_max x J x R 
             curr_S = self.S[i:i+curr_batch_size, :].unsqueeze(1).unsqueeze(1).expand(-1, self.tensor.i_max, self.tensor.j, -1)  # batch size x i_max x J x R
@@ -307,7 +309,28 @@ class parafac2:
                 sq_loss = sq_loss + curr_loss
                 
         return sq_loss        
-        
+    
+    
+    def L2_loss_tucker_dense(self, batch_size):
+        _loss = 0
+        with torch.no_grad():        
+            for i in tqdm(range(0, self.tensor.k, batch_size)):                
+                curr_batch_size = min(batch_size, self.tensor.k - i)
+                curr_tensor = self.set_curr_tensor(curr_batch_size, i)    # batch size x i_max x J   
+                curr_U = self.centroids[self.mapping[i:i+curr_batch_size, :]] * self.U_mask[i:i+curr_batch_size, :, :] # batch size x i_max x R               
+                curr_G = torch.reshape(self.G, (self.rank, self.rank**2))    # R x R^2
+                curr_G = curr_G.unsqueeze(0).repeat(curr_batch_size, 1, 1)  # batch size x R x R^2
+                UG = torch.bmm(curr_U, curr_G)   # batch size x i_max x R^2
+                            
+                curr_S = self.S[i:i+curr_batch_size, :].unsqueeze(1)  # batch size x 1 x R                                
+                VS = batch_kron(self.V.data.unsqueeze(0).repeat(curr_batch_size, 1, 1), curr_S)   # batch size x j x R^2  
+                VS = torch.transpose(VS, 1, 2)   # batch size x R^2 x j
+                approx = torch.bmm(UG, VS)   # batch size x i_max x j                
+                curr_loss = torch.sum(torch.square(approx - curr_tensor))        
+                _loss += curr_loss.item()
+
+        return _loss
+    
     
     def als_U(self, args):    
         with torch.no_grad():                    
@@ -320,13 +343,16 @@ class parafac2:
                 curr_batch_size = min(args.tucker_batch_u, self.tensor.k - i)
                 # declare tensor
                 # Build tensor
-                curr_rows = list(itertools.chain.from_iterable(self.tensor.rows_list[i: i+curr_batch_size]))
-                curr_cols = list(itertools.chain.from_iterable(self.tensor.cols_list[i: i+curr_batch_size]))
-                curr_heights = list(itertools.chain.from_iterable(self.tensor.heights_list[i: i+curr_batch_size]))
-                curr_heights = [_h - i for _h in curr_heights]
-                curr_vals = list(itertools.chain.from_iterable(self.tensor.vals_list[i: i+curr_batch_size]))       
-                      
-                curr_tensor = torch.sparse_coo_tensor([ curr_heights, curr_rows, curr_cols], curr_vals, (curr_batch_size, self.tensor.i_max, self.tensor.j), device=self.device, dtype=torch.double)  # batch size x i_max x j
+                if args.is_dense:            
+                    curr_tensor = self.set_curr_tensor(curr_batch_size, i)
+                else:                    
+                    curr_rows = list(itertools.chain.from_iterable(self.tensor.rows_list[i: i+curr_batch_size]))
+                    curr_cols = list(itertools.chain.from_iterable(self.tensor.cols_list[i: i+curr_batch_size]))
+                    curr_heights = list(itertools.chain.from_iterable(self.tensor.heights_list[i: i+curr_batch_size]))
+                    curr_heights = [_h - i for _h in curr_heights]
+                    curr_vals = list(itertools.chain.from_iterable(self.tensor.vals_list[i: i+curr_batch_size]))       
+
+                    curr_tensor = torch.sparse_coo_tensor([ curr_heights, curr_rows, curr_cols], curr_vals, (curr_batch_size, self.tensor.i_max, self.tensor.j), device=self.device, dtype=torch.double)  # batch size x i_max x j
                 
                 # common features
                 curr_mapping = self.mapping[i:i+curr_batch_size, :]   # batch size x i_max
@@ -437,13 +463,17 @@ class parafac2:
             for i in tqdm(range(0, self.tensor.k, args.tucker_batch_g)):
                 curr_batch_size = min(args.tucker_batch_g, self.tensor.k - i)
                 # Build tensor
-                curr_rows = list(itertools.chain.from_iterable(self.tensor.rows_list[i: i+curr_batch_size]))
-                curr_cols = list(itertools.chain.from_iterable(self.tensor.cols_list[i: i+curr_batch_size]))
-                curr_heights = list(itertools.chain.from_iterable(self.tensor.heights_list[i: i+curr_batch_size]))
-                curr_heights = [_h - i for _h in curr_heights]
-                curr_vals = list(itertools.chain.from_iterable(self.tensor.vals_list[i: i+curr_batch_size]))       
-                      
-                curr_tensor = torch.sparse_coo_tensor([curr_heights, curr_cols, curr_rows], curr_vals, (curr_batch_size, self.tensor.j, self.tensor.i_max), device=self.device, dtype=torch.double)  # batch size x j x i_max
+                if args.is_dense:
+                    curr_tensor = self.set_curr_tensor(curr_batch_size, i)
+                    curr_tensor = torch.transpose(curr_tensor, 1, 2)   # batch size x j x i_max
+                else:
+                    curr_rows = list(itertools.chain.from_iterable(self.tensor.rows_list[i: i+curr_batch_size]))
+                    curr_cols = list(itertools.chain.from_iterable(self.tensor.cols_list[i: i+curr_batch_size]))
+                    curr_heights = list(itertools.chain.from_iterable(self.tensor.heights_list[i: i+curr_batch_size]))
+                    curr_heights = [_h - i for _h in curr_heights]
+                    curr_vals = list(itertools.chain.from_iterable(self.tensor.vals_list[i: i+curr_batch_size]))       
+
+                    curr_tensor = torch.sparse_coo_tensor([curr_heights, curr_cols, curr_rows], curr_vals, (curr_batch_size, self.tensor.j, self.tensor.i_max), device=self.device, dtype=torch.double)  # batch size x j x i_max
                 
                 # second mat
                 curr_mapping = self.mapping[i:i+curr_batch_size, :]   # batch size x i_max
@@ -465,24 +495,27 @@ class parafac2:
             self.G.data = torch.permute(self.G.data, (1, 0, 2))
             
     
-    def als(self, args):
+    def als(self, args):                
         self.init_tucker(args)
-        sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
+        if args.is_dense:
+            sq_loss = self.L2_loss_tucker_dense(args.batch_size)
+        else:
+            sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
         prev_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)
         print(f'loss after loaded:{prev_fit}')
         
         for e in range(args.epoch_als):
             self.als_G(args)        
             self.als_U(args)
-            self.als_G(args)            
-            self.als_V(args)
-            self.als_G(args)       
-            #sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
-            #curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)   
-            #print(f'epoch: {e+1}, before s:{curr_fit}')
-            self.als_S(args)
+            #self.als_G(args)            
+            #self.als_V(args)
+            #self.als_G(args)                   
+            #self.als_S(args)
                         
-            sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
+            if args.is_dense:
+                sq_loss = self.L2_loss_tucker_dense(args.batch_size)
+            else:
+                sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
             curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)            
             with open(args.output_path + ".txt", 'a') as f:
                 f.write(f'als epoch: {e+1}, after s:{curr_fit}\n')
@@ -492,8 +525,11 @@ class parafac2:
                 break
             prev_fit = curr_fit
         
+        '''
         torch.save({
             'fitness': curr_fit, 'mapping': self.mapping,
             'centroids': self.centroids, 'U': self.U.data,
             'S': self.S, 'V': self.V, 'G': self.G
         }, args.output_path + ".pt")
+        '''
+        
