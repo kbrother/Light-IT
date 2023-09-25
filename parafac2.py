@@ -511,7 +511,7 @@ class parafac2:
     def als(self, args):                
         self.init_tucker(args)
         if args.is_dense:
-            sq_loss = self.L2_loss_tucker_dense(args.batch_size)
+            sq_loss = self.L2_loss_tucker_dense(args.tucker_batch_lossnz)
         else:
             sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
         prev_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)

@@ -61,16 +61,47 @@ def huffman_encoding(_tensor, cluster_result):
                                     
     return num_bits
     
-# python huffman.py -tp ../data/23-Irregular-Tensor/ml-1m.npy -rp results/ml-1m-rank10.pt
+# python huffman.py -tp ../data/23-Irregular-Tensor/action.npy -rp results/action-lr0.01-rank5_cp.pt -r 5
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-tp', "--tensor_path", type=str)    
     parser.add_argument('-rp', "--result_path", type=str)   
-    args = parser.parse_args()    
+    parser.add_argument('-d', "--device", type=str)   
+    parser.add_argument('-r', "--rank", type=int)  
+    parser.add_argument('-fp', "--factor_path", type=str)            
+    parser.add_argument(
+        "-bif", "--batch_init_factor",
+        action="store", default=2**6, type=int
+    )
+    
+    parser.add_argument(
+        "-cb", "--cluster_batch",
+        action="store", default=64, type=int
+    )
         
-    _tensor = irregular_tensor(args.tensor_path, torch.device('cpu'))
+    parser.add_argument(
+        "-b", "--batch_size",
+        action="store", default=2**7, type=int
+    )
+    
+    args = parser.parse_args()    
+    args.is_dense = True
+    
+    if args.device == None:
+        device = torch.device("cpu")
+    else:
+        device = torch.device(f'cuda:{args.device}')
+    _tensor = irregular_tensor(args.tensor_path, torch.device(device), True)
     result_dict = torch.load(args.result_path)
     print("load finish")
     
-    cluster_result = result_dict['mapping'].cpu()  # k x i_max
+    if 'mapping' in result_dict:
+        cluster_result = result_dict['mapping'].cpu()  # k x i_max
+    else:
+        _parafac2 = parafac2(_tensor, device, args)        
+        _parafac2.centroids.data.copy_(result_dict['centroids'].to(device))
+        _parafac2.U.data.copy_(result_dict['U'].to(device))
+        _parafac2.V.data.copy_(result_dict['V'].to(device))
+        _parafac2.S.data.copy_(result_dict['S'].to(device))
+        cluster_result = _parafac2.clustering(args).cpu()  # k x i_max
     print(f'num params: {huffman_encoding(_tensor, cluster_result)/64}')
