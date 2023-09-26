@@ -20,19 +20,9 @@ def dfs(curr_node, curr_bit, result_dict = {}):
         dfs(curr_node.childs[0], curr_bit + [0], result_dict)
         dfs(curr_node.childs[1], curr_bit + [1], result_dict)
     
-'''
-    cluster_result: k x i_max
-    data_rows: k
-'''
-def huffman_encoding(_tensor, cluster_result):
-    cluster_result = cluster_result.numpy().tolist()
-    total_map = []
-    for i in range(_tensor.k):
-        curr_map = [cluster_result[i][j] for j in range(_tensor.i[i])]
-        total_map.append(curr_map)
     
-    total_map = list(itertools.chain.from_iterable(total_map))
-    count_result = Counter(total_map)
+def huffman_encoding(indices):
+    count_result = Counter(indices)
     count_result = [tree(k, v) for k, v in sorted(count_result.items(), key=lambda item: item[1])]
     
     # Build huffman trees
@@ -55,12 +45,30 @@ def huffman_encoding(_tensor, cluster_result):
     result_dict = {}
     dfs(count_result[0], [], result_dict)
     
+    return result_dict
+    
+    
+'''
+    cluster_result: k x i_max
+    data_rows: k
+'''
+def encoding(_tensor, cluster_result):
+    cluster_result = cluster_result.numpy().tolist()
+    total_map = []
+    for i in range(_tensor.k):
+        curr_map = [cluster_result[i][j] for j in range(_tensor.i[i])]
+        total_map.append(curr_map)
+    
+    total_map = list(itertools.chain.from_iterable(total_map))
+    result_dict = huffman_encoding(total_map)
+    
     num_bits = 0
     for i in range(_tensor.k):
         for j in range(_tensor.i[i]):
             num_bits += len(result_dict[cluster_result[i][j]])
                                     
     return num_bits
+    
     
 # python huffman.py -tp ../data/23-Irregular-Tensor/cms.npy -rp results/cms-lr0.01-rank5.pt -r 5 -de 0 -d False
 if __name__ == '__main__':
@@ -143,4 +151,4 @@ if __name__ == '__main__':
             print(f'fitness: {1 - math.sqrt(sq_loss)/math.sqrt(_tensor.sq_sum)}')
         cluster_result = _parafac2.clustering(args).cpu()  # k x i_max
         
-    print(f'num params: {huffman_encoding(_tensor, cluster_result)/64}')
+    print(f'num params: {encoding(_tensor, cluster_result)/64}')

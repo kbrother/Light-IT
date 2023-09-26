@@ -40,7 +40,7 @@ if __name__ == '__main__':
     
     parser.add_argument(
         "-cb", "--cluster_batch",
-        action="store", default=2**6, type=int
+        action="store", default=64, type=int
     )
         
     parser.add_argument(
@@ -55,7 +55,7 @@ if __name__ == '__main__':
     
     parser.add_argument(
         "-tbn", "--tucker_batch_lossnz",
-        action="store", default=2**11, type=int
+        action="store", default=2**5, type=int
     )
     
     parser.add_argument(
@@ -70,7 +70,7 @@ if __name__ == '__main__':
     
     parser.add_argument(
         "-tbs", "--tucker_batch_s",
-        action="store", default=2**5, type=int
+        action="store", default=2**2, type=int
     )
     
     parser.add_argument(
