@@ -4,6 +4,7 @@ from data import irregular_tensor
 import torch
 from collections import Counter
 import itertools
+import math
 
 class tree:
     def __init__(self, entry_id, count):
@@ -61,14 +62,18 @@ def huffman_encoding(_tensor, cluster_result):
                                     
     return num_bits
     
-# python huffman.py -tp ../data/23-Irregular-Tensor/action.npy -rp results/action-lr0.01-rank5_cp.pt -r 5
+# python huffman.py -tp ../data/23-Irregular-Tensor/cms.npy -rp results/cms-lr0.01-rank5.pt -r 5 -de 0 -d False
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-tp', "--tensor_path", type=str)    
-    parser.add_argument('-rp', "--result_path", type=str)   
-    parser.add_argument('-d', "--device", type=str)   
+    parser.add_argument('-rp', "--result_path", type=str)       
     parser.add_argument('-r', "--rank", type=int)  
     parser.add_argument('-fp', "--factor_path", type=str)            
+    parser.add_argument('-d', "--is_dense", type=str, default="error")
+    parser.add_argument(
+        "-de", "--device",
+        action="store", type=int
+    )    
     parser.add_argument(
         "-bif", "--batch_init_factor",
         action="store", default=2**6, type=int
@@ -84,24 +89,58 @@ if __name__ == '__main__':
         action="store", default=2**7, type=int
     )
     
+    parser.add_argument(
+        "-tbz", "--tucker_batch_lossz",
+        action="store", default=2**6, type=int
+    )
+    
+    parser.add_argument(
+        "-tbn", "--tucker_batch_lossnz",
+        action="store", default=2**5, type=int
+    )
+    
     args = parser.parse_args()    
-    args.is_dense = True
+    if args.is_dense == "True":
+        args.is_dense = True
+    elif args.is_dense == "False":
+        args.is_dense = False
+    else:
+        assert("wrong input")
     
     if args.device == None:
         device = torch.device("cpu")
     else:
         device = torch.device(f'cuda:{args.device}')
-    _tensor = irregular_tensor(args.tensor_path, torch.device(device), True)
+    _tensor = irregular_tensor(args.tensor_path, torch.device(device), args.is_dense)
     result_dict = torch.load(args.result_path)
     print("load finish")
     
+    _parafac2 = parafac2(_tensor, device, args)        
+    _parafac2.centroids.data.copy_(result_dict['centroids'].to(device))
+    _parafac2.U.data.copy_(result_dict['U'].to(device))
+    _parafac2.V.data.copy_(result_dict['V'].to(device))
+    _parafac2.S.data.copy_(result_dict['S'].to(device))
+        
     if 'mapping' in result_dict:
+        _parafac2.mapping = result_dict['mapping'].to(device) # k x i_max
+        _parafac2.mapping_mask = torch.zeros(_tensor.k, _tensor.i_max, dtype=torch.bool, device=device)   # k x i_max
+        for _k in range(_tensor.k):        
+            _parafac2.mapping_mask[_k, :_tensor.i[_k]] = True
+        _parafac2.G = result_dict['G'].to(device)    
+        with torch.no_grad():
+            if args.is_dense:
+                sq_loss = _parafac2.L2_loss_tucker_dense(args.tucker_batch_loss_nz)
+            else:
+                sq_loss = _parafac2.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)                
+            print(f'fitness: {1 - math.sqrt(sq_loss)/math.sqrt(_tensor.sq_sum)}')
         cluster_result = result_dict['mapping'].cpu()  # k x i_max
     else:
-        _parafac2 = parafac2(_tensor, device, args)        
-        _parafac2.centroids.data.copy_(result_dict['centroids'].to(device))
-        _parafac2.U.data.copy_(result_dict['U'].to(device))
-        _parafac2.V.data.copy_(result_dict['V'].to(device))
-        _parafac2.S.data.copy_(result_dict['S'].to(device))
+        with torch.no_grad():
+            if args.is_dense:
+                sq_loss = _parafac2.L2_loss_dense(False, args.batch_size, _parafac2.U * _parafac2.U_mask)
+            else:
+                sq_loss = _parafac2.L2_loss(False, args.batch_size, _parafac2.U * _parafac2.U_mask)
+            print(f'fitness: {1 - math.sqrt(sq_loss)/math.sqrt(_tensor.sq_sum)}')
         cluster_result = _parafac2.clustering(args).cpu()  # k x i_max
+        
     print(f'num params: {huffman_encoding(_tensor, cluster_result)/64}')
