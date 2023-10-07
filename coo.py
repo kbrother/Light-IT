@@ -21,6 +21,7 @@ def encoding(_tensor):
     
 
 # python coo.py -tp ../data/23-Irregular-Tensor/cms.npy
+# python coo.py -tp ../data/23-Irregular-Tensor/mimic3.npy
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-tp', "--tensor_path", type=str)    

@@ -71,6 +71,7 @@ def encoding(_tensor, cluster_result):
     
     
 # python huffman.py -tp ../data/23-Irregular-Tensor/cms.npy -rp results/cms-lr0.01-rank5.pt -r 5 -de 0 -d False
+# python huffman.py -tp ../data/23-Irregular-Tensor/mimic3.npy -rp results/mimic3-lr0.01-rank5.pt -r 5 -de 4 -d False
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-tp', "--tensor_path", type=str)    
@@ -144,11 +145,14 @@ if __name__ == '__main__':
         cluster_result = result_dict['mapping'].cpu()  # k x i_max
     else:
         with torch.no_grad():
+            cluster_result = _parafac2.clustering(args)
+            U_clustered = _parafac2.centroids[cluster_result]    # k x i_max x rank         
+            U_clustered = U_clustered * _parafac2.U_mask
             if args.is_dense:
-                sq_loss = _parafac2.L2_loss_dense(False, args.batch_size, _parafac2.U * _parafac2.U_mask)
+                sq_loss = _parafac2.L2_loss_dense(False, args.batch_size, U_clustered)
             else:
-                sq_loss = _parafac2.L2_loss(False, args.batch_size, _parafac2.U * _parafac2.U_mask)
+                sq_loss = _parafac2.L2_loss(False, args.batch_size, U_clustered)
             print(f'fitness: {1 - math.sqrt(sq_loss)/math.sqrt(_tensor.sq_sum)}')
-        cluster_result = _parafac2.clustering(args).cpu()  # k x i_max
+        cluster_result = cluster_result.cpu()  # k x i_max
         
     print(f'num params: {encoding(_tensor, cluster_result)/64}')
