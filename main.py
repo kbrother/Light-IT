@@ -4,6 +4,8 @@ from data import irregular_tensor
 import torch
 import gc
 import os
+import random
+import numpy as np
 
 # python main.py tra -tp ../data/23-Irregular-Tensor/delicious.pickle -de 0 -r 10 -d False
 # python main.py tra -tp ../data/23-Irregular-Tensor/kstock.npy -de 0 -r 10 -d True
@@ -73,6 +75,10 @@ if __name__ == '__main__':
         "-tbg", "--tucker_batch_g",
         action="store", default=2**6, type=int
     )
+    
+    torch.manual_seed(0)
+    random.seed(0)
+    np.random.seed(0)
     
     args = parser.parse_args()    
     if args.is_dense == "True":

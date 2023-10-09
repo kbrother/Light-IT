@@ -19,6 +19,11 @@ class irregular_tensor:
             for i in range(self.num_tensor):
                 self.sq_sum += np.sum(np.square(self.src_tensor[i]))
 
+            temp_dims = [self.num_tensor, self.max_first] + list(self.middle_dim)
+            self.src_tensor_torch = torch.zeros(temp_dims, dtype=torch.double)
+            for i in range(self.num_tensor):
+                self.src_tensor_torch[i,:self.first_dim[i],:] = torch.tensor(self.src_tensor[i], dtype=torch.double)
+                
         # upload data to gpu        
         if not is_dense:
             with open(input_path, 'rb') as f:
@@ -35,6 +40,7 @@ class irregular_tensor:
             idx2newidx = np.argsort(self.indices[-1])
             for m in range(self.mode):
                 self.indices[m] = self.indices[m][idx2newidx]
+            self.values = self.values[idx2newidx]            
             
             # save tensor stat        
             self.max_first = max(self.indices[0]) + 1

@@ -30,18 +30,10 @@ def khatri_rao(input1, input2):
     return input1 * input2
     
     
-class parafac2:
-    def set_curr_tensor(self, curr_batch_size, i):
-        curr_dims = curr_batch_size + self.tensor.max_first + self.tensor.middle_dim
-        curr_tensor = torch.zeros(curr_dims, device=self.device, dtype=torch.double)
-        for j in range(curr_batch_size):
-            curr_tensor[j,:self.tensor.first_dim[i+j]] = torch.from_numpy(self.tensor.src_tensor[i + j])
-        return curr_tensor
-    
-        
+class parafac2:        
     def init_factor(self, is_dense):
         with torch.no_grad():
-            _H = torch.rand((self.rank, self.rank), device=self.device, dtype=torch.double)
+            _H = torch.rand((self.rank, self.rank), device=self.device, dtype=torch.double)        
             if is_dense:
                 Vprod = self.V[0]
                 for m in range(1, self.tensor.mode-2):
@@ -54,7 +46,8 @@ class parafac2:
                     curr_dims = [curr_first_dim] + list(self.tensor.middle_dim)
                     curr_tensor = torch.zeros(curr_dims, device=self.device, dtype=torch.double)
                     curr_tensor[:self.tensor.first_dim[i]] = torch.from_numpy(self.tensor.src_tensor[i]).to(self.device)
-                    curr_tensor = torch.reshape(curr_tensor, (curr_first_dim, -1))  # i_max x ...                                        
+                    curr_tensor = torch.reshape(curr_tensor, (curr_first_dim, -1))  # i_max x ...       
+                
                     VS = Vprod * self.S[i].unsqueeze(0) # row2 * rows3 *.... x rank
                     XVS = curr_tensor @ VS  # i_max x R                     
                 else:   
@@ -124,13 +117,15 @@ class parafac2:
             self.V.append(torch.rand((curr_dim, self.rank), device=device, dtype=torch.double))  # j x rank
         self.S = torch.rand((_tensor.num_tensor, self.rank), device=device, dtype=torch.double)      # k x rank        
         self.init_factor(args.is_dense)        
-        
-        '''
+
         # Upload to gpu        
-        self.centroids = torch.rand((_tensor.i_max, self.rank), device=device, dtype=torch.double)    # cluster centers,  i_max x rank
+        self.centroids = torch.rand((_tensor.max_first, self.rank), device=device, dtype=torch.double)    # cluster centers,  i_max x rank
         self.centroids = torch.nn.Parameter(self.centroids)                      
         self.U = torch.nn.Parameter(self.U)
-        self.S, self.V = torch.nn.Parameter(self.S), torch.nn.Parameter(self.V)                
+        self.S = torch.nn.Parameter(self.S)
+        for m in range(_tensor.mode-2):
+            self.V[m] = torch.nn.Parameter(self.V[m])
+        
         with torch.no_grad():
             if args.is_dense:
                 sq_loss = self.L2_loss_dense(False, args.batch_size, self.U * self.U_mask)
@@ -138,17 +133,28 @@ class parafac2:
                 sq_loss = self.L2_loss(False, args.batch_size, self.U * self.U_mask)
             print(f'fitness: {1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)}') 
             print(f'square loss: {sq_loss}')
+            
+            
     '''
-    
+        input_U: num_tensor x i_max x rank
+    '''
     def L2_loss_dense(self, is_train, batch_size, input_U):
         _loss = 0
-        for i in range(0, self.tensor.k, batch_size):
-            curr_batch_size = min(batch_size, self.tensor.k - i)
-            curr_tensor = self.set_curr_tensor(curr_batch_size, i)      
-            curr_U = input_U[i:i+curr_batch_size, :, :].unsqueeze(2).expand(-1, -1, self.tensor.j, -1)  # batch size x i_max x J x R
-            curr_V = self.V.unsqueeze(0).unsqueeze(0).expand(curr_batch_size, self.tensor.i_max, -1, -1)   # batch size x i_max x J x R 
-            curr_S = self.S[i:i+curr_batch_size, :].unsqueeze(1).unsqueeze(1).expand(-1, self.tensor.i_max, self.tensor.j, -1)  # batch size x i_max x J x R
-            approx = torch.sum(curr_U * curr_V * curr_S, dim=-1)  # batch_size x i_max x J
+        Vprod = self.V[0]
+        for i in range(1, self.tensor.mode-2):
+            Vprod = khatri_rao(Vprod, self.V[i]).unsqueeze(0)   # 1 x i_2 * ... * i_(m-1) x rank        
+            
+        for i in range(0, self.tensor.num_tensor, batch_size):                        
+            curr_batch_size = min(batch_size, self.tensor.num_tensor - i) 
+            curr_S = self.S[i:i+curr_batch_size, :].unsqueeze(1)  # bs x 1 x rank
+            VS = Vprod * curr_S   # bs x i_2 * ... * i_(m-1) x rank        
+            VS = torch.transpose(VS, 1, 2)   # bs x rank x i_2 * ... * i_(m-1)        
+            
+            curr_U = input_U[i:i+curr_batch_size, :, :] # batch size x i_max x rank
+            approx = torch.bmm(curr_U, VS)   # bs x i_max x i_2 * ... * i_(m-1)        
+            curr_tensor = self.tensor.src_tensor_torch[i:i+curr_batch_size].to(self.device)  # bs x i_max x i_2 x ... x i_(m-1)  
+            curr_tensor = torch.reshape(curr_tensor, (curr_batch_size, self.tensor.max_first, -1))   # bs x i_max x i_2 * ... * i_(m-1)  
+            
             curr_loss = torch.sum(torch.square(approx - curr_tensor))
             if is_train:
                 curr_loss.backward()
@@ -160,51 +166,42 @@ class parafac2:
     '''
         input_U: k x i_max x rank
     '''
-    def L2_loss(self, is_train, batch_size, input_U):        
-        # V * sigma * H^T
-        # Correct non-zero terms
+    def L2_loss(self, is_train, batch_size, input_U):                
+        # zero terms
         _loss = 0        
-        for i in range(0, self.tensor.k, batch_size):
-            curr_batch_size = min(batch_size, self.tensor.k - i)
-            curr_V = self.V.repeat(curr_batch_size, 1, 1)  # k x j x rank
-            VS = curr_V * self.S[i:i+curr_batch_size, :].unsqueeze(1)   # k x j x rank        
-            VS_t = torch.transpose(VS, 1, 2)  # k x rank x j  
-            temp_tensor = torch.bmm(VS_t, VS)  # k x rank x rank
-        
-            # Computing the sum of square of tensors generated by parafac2
-            curr_U = input_U[i:i+curr_batch_size, :, :]   # k x i_max x rank
-            curr_mask = self.U_mask[i:i+curr_batch_size, :, :]
-            temp_tensor = torch.matmul(curr_U*curr_mask, temp_tensor)    # k x i_max x rank
-            sq_sum = torch.sum(temp_tensor * curr_U)   # k x i_max x rank
-            if is_train: sq_sum.backward()
-            _loss += sq_sum.item()              
-        
+        VtV = torch.ones((self.rank, self.rank), device=self.device, dtype=torch.double)  # r x r
+        for i in range(self.tensor.mode-2):
+            VtV = VtV * (self.V[i].t() @ self.V[i])  # r x r
+            
+        UtU = torch.bmm(torch.transpose(input_U, 1, 2), input_U) # k x rank x rank
+        StS = torch.bmm(self.S.unsqueeze(2), self.S.unsqueeze(1)) # k x rank x rank
+        first_mat = torch.sum(UtU * StS, dim=0)  # rank x rank
+        sq_sum = torch.sum(first_mat * VtV)
+        if is_train: 
+            sq_sum.backward()
+        _loss = sq_sum.item()
         
         # Correct non-zero terms        
-        for i in range(0, self.tensor.num_nnz, batch_size * self.tensor.k):
-            sq_err = 0
-            if self.tensor.num_nnz - i < batch_size*self.tensor.k:
-                curr_batch_size = self.tensor.num_nnz - i
-            else:
-                curr_batch_size = batch_size * self.tensor.k
-                
-            # Prepare matrices
-            _row = self.tensor.rows[i:i+curr_batch_size]
-            _col = self.tensor.cols[i:i+curr_batch_size]
-            _height = self.tensor.heights[i:i+curr_batch_size]
-            _vals = self.tensor.vals[i:i+curr_batch_size]
+        for i in range(0, self.tensor.num_nnz, batch_size):
+            curr_batch_size = min(batch_size, self.tensor.num_nnz - i)
+            first_idx = torch.tensor(self.tensor.indices[0][i: i+curr_batch_size], device=self.device, dtype=torch.long) # bs
+            final_idx = torch.tensor(self.tensor.indices[-1][i: i+curr_batch_size], device=self.device, dtype=torch.long)  # bs
             
-            _U = input_U[_height, _row, :]  # batch size x rank            
-            _S = self.S[_height, :]        # batch size x rank
-            _V = self.V[_col, :]           # batch size x rank
-            _approx = torch.sum(_U*_S*_V, dim=1)
-            sq_err = sq_err - torch.sum(torch.square(_approx))
-            sq_err = sq_err + torch.sum(torch.square(_approx - _vals))
+            approx = input_U[final_idx, first_idx, :] * self.S[final_idx, :]  # bs x rank
+            for m in range(1, self.tensor.mode-1):
+                curr_idx = torch.tensor(self.tensor.indices[m][i: i+curr_batch_size], device=self.device, dtype=torch.long)
+                approx = approx * self.V[m-1][curr_idx, :]   # bs x rank
+            
+            curr_value = torch.tensor(self.tensor.values[i: i+curr_batch_size], dtype=torch.double, device=self.device)
+            approx = torch.sum(approx, dim=1)
+            sq_err = torch.sum(torch.square(curr_value - approx) - torch.square(approx))
+            
             if is_train: sq_err.backward()
             _loss += sq_err.item()
             
         return _loss
 
+    
     '''
         cluster_label: k x i_max
     '''
