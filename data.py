@@ -24,7 +24,7 @@ class irregular_tensor:
             with open(input_path, 'rb') as f:
                 raw_dict = pickle.load(f)            
             self.indices = raw_dict['idx']
-            self.num_nnz = len(self.indices)
+            self.num_nnz = len(self.indices[0])
             self.values = np.array(raw_dict['val'])
             self.mode = len(self.indices)
             
@@ -47,3 +47,10 @@ class irregular_tensor:
             for i in range(self.num_nnz):
                 if self.indices[-1][self.tidx2start[-1]] != self.indices[-1][i]:
                     self.tidx2start.append(i)
+            self.tidx2start.append(self.num_nnz)
+            
+            # Set first dim
+            self.first_dim = []
+            for i in range(self.num_tensor):
+                self.first_dim.append(max(self.indices[0][self.tidx2start[i]:self.tidx2start[i+1]]) + 1)
+            self.first_dim = np.array(self.first_dim)

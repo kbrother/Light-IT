@@ -5,12 +5,13 @@ import torch
 import gc
 import os
 
+# python main.py tra -tp ../data/23-Irregular-Tensor/delicious.pickle -de 0 -r 10 -d False
+# python main.py tra -tp ../data/23-Irregular-Tensor/kstock.npy -de 0 -r 10 -d True
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('action', type=str, help='type of running')
     parser.add_argument('-tp', "--tensor_path", type=str)
     parser.add_argument('-op', "--output_path", type=str)
-    parser.add_argument('-fp', "--factor_path", type=str)
     parser.add_argument('-r', "--rank", type=int)
     parser.add_argument('-d', "--is_dense", type=str, default="error")
         
@@ -21,7 +22,7 @@ if __name__ == '__main__':
     
     parser.add_argument(
         "-b", "--batch_size",
-        action="store", default=2**9, type=int
+        action="store", default=2**10, type=int
     )
     
     parser.add_argument(
@@ -37,15 +38,10 @@ if __name__ == '__main__':
     parser.add_argument(
         "-lr", "--lr", action="store", type=float
     )
-    
+        
     parser.add_argument(
         "-cb", "--cluster_batch",
         action="store", default=64, type=int
-    )
-        
-    parser.add_argument(
-        "-bif", "--batch_init_factor",
-        action="store", default=2**6, type=int
     )
     
     parser.add_argument(
@@ -87,7 +83,7 @@ if __name__ == '__main__':
         assert("wrong input")
     
     device = torch.device("cuda:" + str(args.device))
-    _tensor = irregular_tensor(args.tensor_path, device, args.is_dense)
+    _tensor = irregular_tensor(args.tensor_path, args.is_dense)
     print("load finish")
     
     _parafac2 = parafac2(_tensor, device, args)        

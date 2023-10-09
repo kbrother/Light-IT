@@ -21,80 +21,111 @@ def batch_kron(input1, input2):
     return input1 * input2
 
 
+# input1: row1 x col
+# input2: row2 x col
+def khatri_rao(input1, input2):
+    num_row1, num_row2 = input1.shape[0], input2.shape[0]
+    input1 = torch.repeat_interleave(input1, num_row2, dim=0)   # row1*row2 x col
+    input2 = input2.repeat(num_row1, 1)   # row1*row2 x col
+    return input1 * input2
+    
+    
 class parafac2:
     def set_curr_tensor(self, curr_batch_size, i):
-        curr_tensor = torch.zeros(curr_batch_size, self.tensor.i_max, self.tensor.j, device=self.device, dtype=torch.double)
+        curr_dims = curr_batch_size + self.tensor.max_first + self.tensor.middle_dim
+        curr_tensor = torch.zeros(curr_dims, device=self.device, dtype=torch.double)
         for j in range(curr_batch_size):
-            curr_tensor[j,:self.tensor.i[i+j],:] = torch.from_numpy(self.tensor.src_tensor[i + j])
+            curr_tensor[j,:self.tensor.first_dim[i+j]] = torch.from_numpy(self.tensor.src_tensor[i + j])
         return curr_tensor
+    
         
-    def init_factor(self, batch_size, is_dense):
+    def init_factor(self, is_dense):
         with torch.no_grad():
             _H = torch.rand((self.rank, self.rank), device=self.device, dtype=torch.double)
-            for i in tqdm(range(0, self.tensor.k, batch_size)):
-                curr_batch_size = min(batch_size, self.tensor.k - i)        
-                # build tensor
-                if is_dense:                    
-                    curr_tensor = self.set_curr_tensor(curr_batch_size, i)
-                else:                    
-                    curr_rows = list(itertools.chain.from_iterable(self.tensor.rows_list[i: i+curr_batch_size]))
-                    curr_cols = list(itertools.chain.from_iterable(self.tensor.cols_list[i: i+curr_batch_size]))
-                    curr_heights = list(itertools.chain.from_iterable(self.tensor.heights_list[i: i+curr_batch_size]))
-                    curr_heights = [_h - i for _h in curr_heights]
-                    curr_vals = list(itertools.chain.from_iterable(self.tensor.vals_list[i: i+curr_batch_size]))                
-                    curr_tensor = torch.sparse_coo_tensor([curr_heights, curr_rows, curr_cols], curr_vals, (curr_batch_size, self.tensor.i_max, self.tensor.j), device=self.device, dtype=torch.double)  # batch size x i_max x j
+            if is_dense:
+                Vprod = self.V[0]
+                for m in range(1, self.tensor.mode-2):
+                    Vprod = khatri_rao(Vprod, self.V[m])   # row2 * rows3 *.... x rank
                 
-                # compute SVD
-                XV = torch.bmm(curr_tensor, self.V.repeat(curr_batch_size, 1, 1))  # batch size x i_max x R
-                XVS = XV * self.S[i:i+curr_batch_size, :].unsqueeze(1)   # batch size x i_max x R
-                XVSH = torch.bmm(XVS, _H.repeat(curr_batch_size, 1, 1))   # batc hsize x i_max x R
-                Z, Sigma, Ph = torch.linalg.svd(XVSH, full_matrices=False)  # Z: batch size x i_max x R, Ph: bathc size x R x R
-                self.U[i:i+curr_batch_size, :] = torch.bmm(Z, Ph) # batch size x i_max x rank
+            for i in tqdm(range(self.tensor.num_tensor)):                                
+                # build tensor
+                if is_dense:  
+                    curr_first_dim = max(self.rank, self.tensor.first_dim[i]) 
+                    curr_dims = [curr_first_dim] + list(self.tensor.middle_dim)
+                    curr_tensor = torch.zeros(curr_dims, device=self.device, dtype=torch.double)
+                    curr_tensor[:self.tensor.first_dim[i]] = torch.from_numpy(self.tensor.src_tensor[i]).to(self.device)
+                    curr_tensor = torch.reshape(curr_tensor, (curr_first_dim, -1))  # i_max x ...                                        
+                    VS = Vprod * self.S[i].unsqueeze(0) # row2 * rows3 *.... x rank
+                    XVS = curr_tensor @ VS  # i_max x R                     
+                else:   
+                    curr_tidx = self.tensor.tidx2start[i]
+                    next_tidx = self.tensor.tidx2start[i + 1]
+                    _V = torch.ones((next_tidx - curr_tidx, self.rank), device=self.device, dtype=torch.double)   # curr nnz x rank
+                    for m in range(self.tensor.mode - 2):
+                        curr_idx = torch.tensor(self.tensor.indices[m + 1][curr_tidx:next_tidx], dtype=torch.long, device=self.device)
+                        _V = _V * self.V[m][curr_idx, :]
+                    
+                    curr_idx = torch.tensor(self.tensor.indices[self.tensor.mode - 1][curr_tidx:next_tidx], dtype=torch.long, device=self.device)
+                    VS = _V * self.S[curr_idx, :]   # curr nnz x rank
+                    curr_X = torch.tensor(self.tensor.values[curr_tidx:next_tidx], device=self.device, dtype=torch.double)
+                    XVS_raw = curr_X.unsqueeze(1) * VS  # curr nnz x rank                
+                    XVS = torch.zeros((max(self.rank, self.tensor.first_dim[i]), self.rank), device=self.device, dtype=torch.double)  # i_curr x rank
+                    
+                    curr_idx = torch.tensor(self.tensor.indices[0][curr_tidx:next_tidx], dtype=torch.long, device=self.device)    # nnz
+                    XVS = XVS.index_add_(0, curr_idx, XVS_raw)  # i_curr x rank                    
+                
+                # compute SVD                               
+                XVSH = XVS @ _H.t()   # i_curr x R                                 
+                Z, Sigma, Ph = torch.linalg.svd(XVSH, full_matrices=False)  # Z: i_max x R, Ph:  R x R
+                self.U[i,:max(self.tensor.first_dim[i], self.rank),:] = torch.mm(Z, Ph) # i_max x rank
 
             # Normalize entry 
-            _lambda = torch.sum(torch.square(_H), dim=0)  # R
+            _lambda = torch.sqrt(torch.sum(torch.square(_H), dim=0))  # R
             _H = _H / _lambda.unsqueeze(0)
-            _lambda = _lambda * torch.sum(torch.square(self.V), dim=0)
-            self.V = self.V / torch.sum(torch.square(self.V), dim=0).unsqueeze(0)
-            _lambda = _lambda * torch.sum(torch.square(self.V), dim=0)
-            self.S = self.S / torch.sum(torch.square(self.S), dim=0).unsqueeze(0)
             
-            _lambda = torch.pow(_lambda, 1/3)
+            for m in range(self.tensor.mode-2):
+                curr_lambda = torch.sqrt(torch.sum(torch.square(self.V[m]), dim=0))
+                _lambda = _lambda * curr_lambda
+                self.V[m] = self.V[m] / curr_lambda.unsqueeze(0)
+                
+            curr_lambda = torch.sqrt(torch.sum(torch.square(self.S), dim=0))
+            _lambda = _lambda * curr_lambda
+            self.S = self.S / curr_lambda.unsqueeze(0)
+            
+            _lambda = torch.pow(_lambda, 1/self.tensor.mode)
             _H = _H * _lambda.unsqueeze(0)
-            self.V = self.V * _lambda.unsqueeze(0)
+            for m in range(self.tensor.mode-2):
+                self.V[m] = self.V[m] * _lambda.unsqueeze(0)
             self.S = self.S * _lambda.unsqueeze(0)
             
             # Normalize U
-            self.U = torch.bmm(self.U, _H.repeat(self.tensor.k, 1, 1))
+            self.U = torch.bmm(self.U, _H.repeat(self.tensor.num_tensor, 1, 1))
+            
+        UTU = torch.bmm(torch.transpose(self.U, 1, 2), self.U)   # k x rank x rank                
+        HTH = _H.t() @ _H
+        #iden = torch.diag(torch.ones(self.rank)).to(self.device)
+        print(torch.mean(torch.abs(UTU - HTH.unsqueeze(0))))        
             
 
     def __init__(self, _tensor, device, args):      
         # Intialization
         self.device = device
         self.tensor = _tensor
-        self.U_mask = torch.zeros((_tensor.k, _tensor.i_max, args.rank), device=device, dtype=torch.double)   # k x i_max x rank, 1 means the valid area
-        for _k in range(_tensor.k):
-            self.U_mask[_k, :_tensor.i[_k], :] = 1
+        self.U_mask = torch.zeros((_tensor.num_tensor, _tensor.max_first, args.rank), device=device, dtype=torch.double)   # k x i_max x rank, 1 means the valid area
+        for _k in range(_tensor.num_tensor):
+            self.U_mask[_k, :_tensor.first_dim[_k], :] = 1
 
-        if args.factor_path is not None:
-            factor_mat = loadmat(args.factor_path)
-            _U = factor_mat['U'][0, :]
-            self.S, self.V = factor_mat['S'], factor_mat['V']
-            self.rank = self.S.shape[1]        
-
-            self.U = np.zeros((_tensor.k, _tensor.i_max, self.rank))   # k x i_max x rank
-            for _k in range(_tensor.k):
-                self.U[_k, :_tensor.i[_k], :] = _U[_k]                
-            self.U = torch.tensor(self.U, device=device)
-            self.S, self.V = torch.tensor(self.S, device=device), torch.tensor(self.V, device=device)  
-        else:
-            self.rank = args.rank
-            self.U = torch.rand((_tensor.k, _tensor.i_max, self.rank), device=device, dtype=torch.double)  # k x i_max x rank        
-            self.U = self.U * self.U_mask            
-            self.S = torch.rand((_tensor.k, self.rank), device=device, dtype=torch.double)      # k x rank
-            self.V = torch.rand((_tensor.j, self.rank), device=device, dtype=torch.double)   # j x rank            
-            self.init_factor(args.batch_init_factor, args.is_dense)
-            
+        self.rank = args.rank
+        self.U = torch.rand((_tensor.num_tensor, _tensor.max_first, self.rank), device=device, dtype=torch.double)  # k x i_max x rank        
+        self.U = self.U * self.U_mask          
+        self.V = []
+        for m in range(self.tensor.mode-2):
+            curr_dim = _tensor.middle_dim[m]
+            self.V.append(torch.rand((curr_dim, self.rank), device=device, dtype=torch.double))  # j x rank
+        self.S = torch.rand((_tensor.num_tensor, self.rank), device=device, dtype=torch.double)      # k x rank        
+        self.init_factor(args.is_dense)        
+        
+        '''
         # Upload to gpu        
         self.centroids = torch.rand((_tensor.i_max, self.rank), device=device, dtype=torch.double)    # cluster centers,  i_max x rank
         self.centroids = torch.nn.Parameter(self.centroids)                      
@@ -107,7 +138,7 @@ class parafac2:
                 sq_loss = self.L2_loss(False, args.batch_size, self.U * self.U_mask)
             print(f'fitness: {1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)}') 
             print(f'square loss: {sq_loss}')
-
+    '''
     
     def L2_loss_dense(self, is_train, batch_size, input_U):
         _loss = 0
