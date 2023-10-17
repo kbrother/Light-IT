@@ -97,7 +97,7 @@ if __name__ == '__main__':
         _parafac2.quantization(args)
         #gc.collect()
         #torch.cuda.empty_cache()    
-        #_parafac2.als(args)
+        _parafac2.als(args)
     elif args.action == "test_loss":
         with torch.no_grad():
             print(f'sparse: {_parafac2.L2_loss(False, args.batch_size, _parafac2.U)}')

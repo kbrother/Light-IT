@@ -273,16 +273,15 @@ class parafac2:
                    
             
     '''
-        Use svd to initialize tucker decomposition
+        Use cpd to initialize tucker decomposition
     '''
     def init_tucker(self, args):
         self.mapping = self.clustering(args)  # k x i_max
-        self.mapping_mask = torch.zeros(self.tensor.k, self.tensor.i_max, dtype=torch.bool, device=self.device)   # k x i_max
-        for _k in range(self.tensor.k):        
-            self.mapping_mask[_k, :self.tensor.i[_k]] = True
-        self.G = torch.zeros(self.rank, self.rank, self.rank, device=self.device, dtype=torch.double)
-        idx_list = list(range(self.rank))
-        self.G[idx_list, idx_list, idx_list] = 1                     
+        self.mapping_mask = torch.zeros(self.tensor.num_tensor, self.tensor.max_first, dtype=torch.bool, device=self.device)   # k x i_max
+        for _k in range(self.tensor.num_tensor):        
+            self.mapping_mask[_k, :self.tensor.first_dim[_k]] = True
+        self.G = torch.zeros([self.rank]*self.tensor.mode, device=self.device, dtype=torch.double)    
+        self.G = self.G.fill_diagonal_(1)
         
         
     '''
@@ -538,6 +537,7 @@ class parafac2:
     
     def als(self, args):                
         self.init_tucker(args)
+        '''
         if args.is_dense:
             sq_loss = self.L2_loss_tucker_dense(args.tucker_batch_lossnz)
         else:
@@ -565,7 +565,7 @@ class parafac2:
             if curr_fit - prev_fit < 1e-4:                 
                 break
             prev_fit = curr_fit
-        
+        '''
         '''
         torch.save({
             'fitness': curr_fit, 'mapping': self.mapping,
