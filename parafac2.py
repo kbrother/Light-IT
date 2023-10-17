@@ -30,6 +30,15 @@ def khatri_rao(input1, input2):
     return input1 * input2
     
     
+# input1: row x col1
+# input2: row x col2
+def face_split(input1, input2):
+    num_col1, num_col2 = input1.shape[1], input2.shape[1]
+    input1 = torch.repeat_interleave(input1, num_col2, dim=1)    # row x col1*col2
+    input2 = input2.repeat(1, num_col1)
+    return input1 * input2
+
+    
 class parafac2:        
     def init_factor(self, is_dense):
         with torch.no_grad():
@@ -285,54 +294,54 @@ class parafac2:
         
         
     '''
-        input_U: k x i_max x rank
-        _row, _col, _height: batch size
+        input_U: k x i_max x rank        
+        indices: list of indices        
         return value: batch size
     '''
-    def compute_irregular_tucker(self, input_U, _row, _col, _height):
-        _U = input_U[_height, _row, :]  # batch size x rank
-        _S = self.S[_height, :]        # batch size x rank
-        _V = self.V[_col, :]           # batch size x rank
-        _approx = torch.bmm(_U.unsqueeze(-1) , _V.unsqueeze(1))   # batch size x rank x rank
-        #print(_approx.unsqueeze(-1).shape)
-        batch_size = _row.shape[0]
-        #print(_S.unsqueeze(1).unsqueeze(1).expand(batch_size, self.rank, 1, self.rank).shape)
-        _approx = torch.matmul(_approx.unsqueeze(-1), _S.unsqueeze(1).unsqueeze(1).expand(batch_size, self.rank, 1, self.rank))    #  batch size x rank x rank x rank
-        _approx = torch.sum(_approx * self.G.unsqueeze(0), (1, 2, 3))    # batch size        
-        return _approx
+    def compute_irregular_tucker(self, input_U, indices):
+        first_mat = input_U[indices[-1], indices[0], :]  # batch size x rank
+        for m in range(self.tensor.mode-2):            
+            first_mat = face_split(first_mat, self.V[m][indices[m+1], :])  
+        
+        first_mat = face_split(first_mat, self.S[indices[-1], :])   # batch size x rank...
+        vec_G = torch.flatten(self.G).unsqueeze(-1)  # rank..... x 1 
+        approx = torch.mm(first_mat, vec_G).squeeze()            
+        return approx
     
     
     def L2_loss_tucker(self, batch_loss_zero, batch_loss_nz):        
         with torch.no_grad():
             input_U = self.centroids[self.mapping] * self.U_mask
 
-            # compute zero terms        
-            VtV = torch.mm(self.V.t(), self.V)   # rank x rank 
+            # compute zero terms                    
+            for m in range(self.tensor.mode-2):
+                if m == 0: 
+                    middle_mat = torch.mm(self.V[m].t(), self.V[m]).unsqueeze(0)
+                else:
+                    middle_mat = batch_kron(middle_mat, torch.mm(self.V[m].t(), self.V[m]).unsqueeze(0))                   
+            middle_mat = middle_mat.squeeze()   # rank x rank
             StS = torch.matmul(self.S.unsqueeze(-1), self.S.unsqueeze(1))  # k x rank x rank
-            mat_G = self.G.reshape(self.rank, self.rank**2)   # rank x rank^2
-
-            num_kron_entry = self.tensor.k * self.rank**6              
+            mat_G = self.G.reshape(self.rank, -1)   # rank x rank^2             
             sq_loss = 0       
-            for i in tqdm(range(0, self.tensor.k, batch_loss_zero)):
-                curr_num_k = min(self.tensor.k - i, batch_loss_zero)
+            
+            for i in tqdm(range(0, self.tensor.num_tensor, batch_loss_zero)):
+                curr_num_k = min(self.tensor.num_tensor - i, batch_loss_zero)
                 UG = torch.bmm(input_U[i:i+curr_num_k, :, :], mat_G.repeat(curr_num_k, 1, 1))   # batch size x i_max x rank^2          
-                middle_mat = batch_kron(VtV.repeat(curr_num_k, 1, 1), StS[i:i+curr_num_k, :, :])   # batch size x rank^2 x rank^2
-                middle_mat = torch.bmm(UG, middle_mat)   # batch size x i_max x rank^2
-                sq_loss = sq_loss + torch.sum(middle_mat * UG)  # batch size
-
-            del UG, middle_mat, VtV, StS                      
+                curr_mmat = batch_kron(middle_mat.repeat(curr_num_k, 1, 1), StS[i:i+curr_num_k, :, :])   # batch size x rank^2 x rank^2
+                #print(UG.shape)
+                #print(curr_mmat.shape)
+                curr_mmat = torch.bmm(UG, curr_mmat)   # batch size x i_max x rank^2
+                sq_loss = sq_loss + torch.sum(curr_mmat * UG)  # batch size
+            
             # Correct non-zero terms
-
             for i in tqdm(range(0, self.tensor.num_nnz, batch_loss_nz)):
                 curr_batch_size = min(self.tensor.num_nnz - i, batch_loss_nz)                
                 # Prepare matrices
-                _row = self.tensor.rows[i:i+curr_batch_size].to(self.device)
-                _col = self.tensor.cols[i:i+curr_batch_size].to(self.device)
-                _height = self.tensor.heights[i:i+curr_batch_size].to(self.device)
-                _vals = self.tensor.vals[i:i+curr_batch_size].to(self.device)
+                curr_indices = [torch.tensor(self.tensor.indices[m][i:i+curr_batch_size], dtype=torch.long, device=self.device) for m in range(self.tensor.mode)]                
+                curr_vals = torch.tensor(self.tensor.values[i:i+curr_batch_size], dtype=torch.double, device=self.device)
 
-                _approx = self.compute_irregular_tucker(input_U, _row, _col, _height)
-                curr_loss = torch.sum(torch.square(_approx - _vals)) - torch.sum(torch.square(_approx))                
+                _approx = self.compute_irregular_tucker(input_U, curr_indices)
+                curr_loss = torch.sum(torch.square(_approx - curr_vals)) - torch.sum(torch.square(_approx))              
                 sq_loss = sq_loss + curr_loss
                 
         return sq_loss        
@@ -536,8 +545,7 @@ class parafac2:
             
     
     def als(self, args):                
-        self.init_tucker(args)
-        '''
+        self.init_tucker(args)        
         if args.is_dense:
             sq_loss = self.L2_loss_tucker_dense(args.tucker_batch_lossnz)
         else:
@@ -545,6 +553,7 @@ class parafac2:
         prev_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)
         print(f'loss after loaded:{prev_fit}')
         
+        '''
         for e in range(args.epoch_als):
             self.als_G(args)        
             self.als_U(args)

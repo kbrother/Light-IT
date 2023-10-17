@@ -53,7 +53,7 @@ if __name__ == '__main__':
     
     parser.add_argument(
         "-tbn", "--tucker_batch_lossnz",
-        action="store", default=2**5, type=int
+        action="store", default=2**9, type=int
     )
     
     parser.add_argument(
@@ -94,9 +94,7 @@ if __name__ == '__main__':
     
     _parafac2 = parafac2(_tensor, device, args)        
     if args.action == "train":
-        _parafac2.quantization(args)
-        #gc.collect()
-        #torch.cuda.empty_cache()    
+        _parafac2.quantization(args)        
         _parafac2.als(args)
     elif args.action == "test_loss":
         with torch.no_grad():
