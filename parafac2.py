@@ -207,24 +207,22 @@ class parafac2:
     '''
     def clustering(self, args):
         # Clustering
-        cluster_label = torch.zeros(self.tensor.k, self.tensor.i_max, dtype=torch.long, device=self.device)
+        cluster_label = torch.zeros(self.tensor.num_tensor, self.tensor.max_first, dtype=torch.long, device=self.device)
         with torch.no_grad():
-            for i in range(0, self.tensor.k, args.cluster_batch):
-                curr_batch_size = min(self.tensor.k - i, args.cluster_batch)
-                dist = torch.zeros((self.tensor.i_max, curr_batch_size, self.tensor.i_max), device=self.device)   # i_max x batch size x i_max
-                curr_U = self.U[i:i+curr_batch_size, :, :]    # batch size x i_max x rank
-                for j in range(self.tensor.i_max):
-                    curr_dist = curr_U - self.centroids[j,:].unsqueeze(0).unsqueeze(0) # batch size x i_max x rank
-                    curr_dist = torch.sum(torch.square(curr_dist), dim=-1) # batch size x i_max
-                    dist[j,:,:] = curr_dist
-                #dist = self.Q.repeat(self.tensor.i_max, 1, 1, 1) - self.centroids.unsqueeze(1).unsqueeze(1)  # i_max x k x i_max x rank
-                #dist = torch.sum(torch.square(dist), dim=-1) # i_max x k x i_max
-                cluster_label[i:i+curr_batch_size, :] = torch.argmin(dist, dim=0)  # batch size x i_max
+            for i in range(0, self.tensor.num_tensor, args.cluster_batch):
+                curr_batch_size = min(self.tensor.num_tensor - i, args.cluster_batch)
+                #dist = torch.zeros((self.tensor.max_first, curr_batch_size, self.tensor.max_first), device=self.device)   # i_max x batch size x i_max
+                curr_U = self.U[i:i+curr_batch_size, :, :]    # batch size x i_max x rank                
+                curr_dist = curr_U.unsqueeze(0) - self.centroids.unsqueeze(1).unsqueeze(1) # i_max x batch size x i_max x rank
+                curr_dist = torch.sum(torch.square(curr_dist), dim=-1) # i_max x batch size x i_max
+                #dist[j,:,:] = curr_dist
+                    
+                cluster_label[i:i+curr_batch_size, :] = torch.argmin(curr_dist, dim=0)  # batch size x i_max
         return cluster_label
         
         
     def quantization(self, args):
-        optimizer = torch.optim.Adam([self.U, self.S, self.V, self.centroids], lr=args.lr)
+        optimizer = torch.optim.Adam([self.U, self.S, self.centroids] + self.V, lr=args.lr)
         max_fitness = -100
         for _epoch in tqdm(range(args.epoch)):
             optimizer.zero_grad()
@@ -258,17 +256,19 @@ class parafac2:
                         max_fitness = _fitness
                         final_U = self.U.data.clone().detach().cpu()
                         final_cents = self.centroids.data.clone().detach().cpu()
-                        final_V = self.V.data.clone().detach().cpu()
+                        final_V = [_v.data.clone().detach().cpu() for _v in self.V]                        
                         final_S = self.S.data.clone().detach().cpu()
                         
         self.centroids.data.copy_(final_cents.to(self.device))
         self.U.data.copy_(final_U.to(self.device))
-        self.V.data.copy_(final_V.to(self.device))
-        self.S.data.copy_(final_S.to(self.device))
         
+        for m in range(self.tensor.mode-2):
+            self.V[m].data.copy_(final_V[m].to(self.device))
+        self.S.data.copy_(final_S.to(self.device))
+                
         torch.save({
             'fitness': max_fitness, 'centroids': self.centroids.data, 
-            'U': self.U.data, 'S': self.S.data, 'V': self.V.data,
+            'U': self.U.data, 'S': self.S.data, 'V': final_V,
         }, args.output_path + "_cp.pt")
                    
             

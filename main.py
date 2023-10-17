@@ -8,7 +8,7 @@ import random
 import numpy as np
 
 # python main.py tra -tp ../data/23-Irregular-Tensor/delicious.pickle -de 0 -r 10 -d False
-# python main.py tra -tp ../data/23-Irregular-Tensor/kstock.npy -de 0 -r 10 -d True
+# python main.py train -tp ../data/23-Irregular-Tensor/delicious.pickle -op results/delicious -r 5 -d False -de 0 -e 10 -lr 0.1
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('action', type=str, help='type of running')
@@ -24,7 +24,7 @@ if __name__ == '__main__':
     
     parser.add_argument(
         "-b", "--batch_size",
-        action="store", default=2**10, type=int
+        action="store", default=2**22, type=int
     )
     
     parser.add_argument(
@@ -94,18 +94,10 @@ if __name__ == '__main__':
     
     _parafac2 = parafac2(_tensor, device, args)        
     if args.action == "train":
-        if os.path.exists(args.output_path + "_cp.pt"):
-            checkpoint = torch.load(args.output_path + "_cp.pt")
-            
-            _parafac2.centroids.data.copy_(checkpoint['centroids'].to(device))
-            _parafac2.U.data.copy_(checkpoint['U'].to(device))
-            _parafac2.V.data.copy_(checkpoint['V'].to(device))
-            _parafac2.S.data.copy_(checkpoint['S'].to(device))
-        else:
-            _parafac2.quantization(args)
+        _parafac2.quantization(args)
         #gc.collect()
         #torch.cuda.empty_cache()    
-        _parafac2.als(args)
+        #_parafac2.als(args)
     elif args.action == "test_loss":
         with torch.no_grad():
             print(f'sparse: {_parafac2.L2_loss(False, args.batch_size, _parafac2.U)}')
