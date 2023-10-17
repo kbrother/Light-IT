@@ -9,6 +9,7 @@ import numpy as np
 
 # python main.py tra -tp ../data/23-Irregular-Tensor/delicious.pickle -de 0 -r 10 -d False
 # python main.py train -tp ../data/23-Irregular-Tensor/delicious.pickle -op results/delicious -r 5 -d False -de 0 -e 10 -lr 0.1
+# python main.py train -tp ../data/23-Irregular-Tensor/action.npy -op results/action -r 5 -d True -de 0 -e 10 -lr 0.1
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('action', type=str, help='type of running')
