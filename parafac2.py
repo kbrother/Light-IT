@@ -543,7 +543,7 @@ class parafac2:
                 # rank^(d-3) x rank^(d-3)
 
                 # define Vkron
-                if args.dense:
+                if args.is_dense:
                     for m in range(1, self.tensor.mode-2):
                         if m == 1:
                             Vkron = self.V[m].unsqueeze(0)
@@ -584,7 +584,7 @@ class parafac2:
                         curr_idx = self.tensor.indices[m][curr_tidx:next_tidx]
                         curr_idx = torch.tensor(curr_idx, dtype=torch.long, device=self.device)
                         _V = self.V[m-1][curr_idx, :].data     # bs' x rank
-                        XUVS = face_split(UVS, _V)
+                        XUVS = face_split(XUVS, _V)
                     # XUVS: bs' x rank^(d-2)
                     
                     XUVS = face_split(XUVS, self.S[curr_li, :].data)    # bs' x rank^(d-1)
