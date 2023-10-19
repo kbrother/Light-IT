@@ -7,8 +7,10 @@ import os
 import random
 import numpy as np
 
-# python main.py tra -tp ../data/23-Irregular-Tensor/delicious.pickle -de 0 -r 10 -d False
+# python main.py test_loss -tp ../data/23-Irregular-Tensor/test.pickle -de 1 -r 10 -d False
+# python main.py test_loss -tp ../data/23-Irregular-Tensor/test.npy -de 1 -r 10 -d True
 # python main.py train -tp ../data/23-Irregular-Tensor/delicious.pickle -op results/delicious -r 5 -d False -de 0 -e 10 -lr 0.1
+# python main.py train -tp ../data/23-Irregular-Tensor/cms.pickle -op results/cms -r 5 -d False -de 0 -e 10 -lr 0.1
 # python main.py train -tp ../data/23-Irregular-Tensor/action.npy -op results/action -r 5 -d True -de 0 -e 10 -lr 0.1
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -77,9 +79,9 @@ if __name__ == '__main__':
         action="store", default=2**6, type=int
     )
     
-    torch.manual_seed(0)
-    random.seed(0)
-    np.random.seed(0)
+    torch.manual_seed(3)
+    random.seed(3)
+    np.random.seed(3)
     
     args = parser.parse_args()    
     if args.is_dense == "True":
@@ -99,8 +101,16 @@ if __name__ == '__main__':
         _parafac2.als(args)
     elif args.action == "test_loss":
         with torch.no_grad():
-            print(f'sparse: {_parafac2.L2_loss(False, args.batch_size, _parafac2.U)}')
-            for i in range(_tensor.k):
-                _tensor.src_tensor[i] = _tensor.src_tensor[i].todense()
-            print(f'dense: {_parafac2.L2_loss_dense(False, args.batch_size, _parafac2.U)}')
-            
+            if args.is_dense:
+                print(f'dense: {_parafac2.L2_loss_dense(False, args.batch_size, _parafac2.U)}')
+            else:
+                print(f'sparse: {_parafac2.L2_loss(False, args.batch_size, _parafac2.U)}')            
+    elif args.action == "test_tucker_loss":
+        _parafac2.init_tucker(args)        
+        _parafac2.G = torch.rand([_parafac2.rank]*_tensor.mode, device=_parafac2.device, dtype=torch.double)   
+        if args.is_dense:
+            sq_loss = _parafac2.L2_loss_tucker_dense(args.tucker_batch_lossnz)
+            print(f'dense: {sq_loss}')
+        else:
+            sq_loss = _parafac2.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
+            print(f'sparse: {sq_loss}')
