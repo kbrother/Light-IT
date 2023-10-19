@@ -177,8 +177,7 @@ class parafac2:
         input_U: k x i_max x rank
     '''
     def L2_loss(self, is_train, batch_size, input_U):                
-        # zero terms
-        _loss = 0        
+        # zero terms             
         VtV = torch.ones((self.rank, self.rank), device=self.device, dtype=torch.double)  # r x r
         for i in range(self.tensor.mode-2):
             VtV = VtV * (self.V[i].t() @ self.V[i])  # r x r
