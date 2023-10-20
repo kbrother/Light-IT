@@ -478,7 +478,7 @@ class parafac2:
             perm_dims = [mode] + [m for m in range(self.tensor.order) if m != mode]
             mat_G = torch.reshape(torch.permute(self.G.data, perm_dims), (self.rank, -1))   # R x R^(d-1)                
             # define VtV
-            VtV = None
+            VtV, Vkron = None, None
             if self.tensor.order > 3:
                 _cnt = 0
                 for m in range(1, self.tensor.order-1): 
@@ -490,8 +490,19 @@ class parafac2:
                     _cnt += 1
                 VtV = VtV.squeeze()  
                 # rank^(d-3) x rank^(d-3)
+                                
+                if args.is_dense:
+                    _cnt = 0
+                    for m in range(1, self.tensor.order-1):
+                        if m == mode: continue
+                        if _cnt == 0:
+                            Vkron = self.V[m-1].unsqueeze()  # 1 x i_m x R
+                        else:
+                            Vkron = batch_kron(Vkron, self.V[m-1])
+                        _cnt += 1
+                    Vkron = Vkron.squeeze()   # i_2*...*i_(d-1) x R^(d-3)
                 
-            first_mat = torch.zeros((self.tensor.middle_dim[mode-1], self.rank), dtype=torch.double, device=self.device) # j_m x R
+            first_mat = torch.zeros((self.tensor.middle_dim[mode-1], self.rank), dtype=torch.double, device=self.device) # i_m x R
             second_mat = 0
             for i in tqdm(range(0, self.tensor.num_tensor, args.tucker_batch_v)):                
                 # Build the first mat
@@ -499,18 +510,21 @@ class parafac2:
                 curr_mapping = self.mapping[i:i+curr_batch_size, :]   # batch size x i_max
                 curr_U = self.centroids.data[curr_mapping] * self.U_mask[i:i+curr_batch_size, :, :]   # batch size x i_max x R
                 curr_S = self.S[i:i+curr_batch_size, :]  # bs x R
-                
+                                
                 if args.is_dense:
-                    curr_tensor = self.set_curr_tensor(curr_batch_size, i)
-                    curr_tensor = torch.transpose(curr_tensor, 1, 2)   # batch size x j x i_max
-                    
-                    # Build front mat
+                    curr_tensor = self.tensor.src_tensor_torch[i:i+curr_batch_size].to(self.device)  # bs x i_1 x i_2 x ... x i_(m-1)                 
+                    perm_dims = [0, mode+1] + [m for m in range(1, self.tensor.order-1) if m != mode+1]    
+                    curr_tensor = torch.permute(curr_tensor, perm_dims)   # bs x i_m x i_max x i_2 x ... x i_(m-1)  
+                    curr_tensor = torch.reshape(curr_tensor, (curr_batch_size, self.tensor.middle_dim[mode-1], -1))   # bs x i_m x i_max x i_2*...*i_(m-1)               
+                                        
                     curr_mapping = self.mapping[i:i+curr_batch_size, :]   # batch size x i_max
-                    curr_U = self.centroids.data[curr_mapping] * self.U_mask[i:i+curr_batch_size, :, :]   # batch size x i_max x R                
-                    curr_S = self.S.data[i:i+curr_batch_size, :].unsqueeze(1)  # batch size x 1 x R
-                    US = batch_kron(curr_U, curr_S)  # batch size x i_max x R^2
-                    curr_front_mat = torch.bmm(curr_tensor, US)    # batch size x j x R^2
-                    front_mat = front_mat + torch.sum(torch.bmm(curr_front_mat, torch.transpose(mat_G, 0, 1).repeat(curr_batch_size, 1, 1,)), dim=0)   # j x R
+                    UVS = curr_U  # batch size x i_max x R                
+                    if self.tensor.order > 3:
+                        UVS = batch_kron(UVS, Vkron.repeat(curr_batch_size, 1, 1))   # batch size x i_max*j_1*...*j_(d-2) x R^(d-2)
+                    UVS = batch_kron(UVS, curr_S.unsqueeze(1))   # batch size x i_max*j_1*...*j_(d-2) x R^(d-1)                    
+                    temp_fm = torch.bmm(curr_tensor, UVS)   # batch size x i_m x R^(d-1)
+                    temp_fm = torch.bmm(temp_fm, mat_G.t().repeat(curr_batch_size, 1, 1))   # batch size x i_m x R
+                    first_mat = first_mat + torch.sum(temp_fm, dim=0)
                 else:                                                                    
                     curr_tidx = self.tensor.tidx2start[i]
                     next_tidx = self.tensor.tidx2start[i + curr_batch_size]
