@@ -390,54 +390,84 @@ class parafac2:
     
     
     def als_U(self, args):    
-        with torch.no_grad():                    
-            first_mat = torch.zeros(self.tensor.i_max, self.rank, device=self.device, dtype=torch.double)   # i_max x rank
-            second_mat = torch.zeros(self.tensor.i_max, self.rank, self.rank, device=self.device, dtype=torch.double)    # i_max x rank x rank
-            curr_G = torch.reshape(self.G, (self.rank, -1))   # rank x rank^2
-            VtV = torch.mm(self.V.data.t(), self.V.data)   # R x R     
+        with torch.no_grad():                   
+            num_clusters = self.centroids.shape[0]
+            first_mat = torch.zeros(num_clusters, self.rank, device=self.device, dtype=torch.double)   # i_max x rank
+            second_mat = torch.zeros(num_clusters, self.rank, self.rank, device=self.device, dtype=torch.double)    # i_max x rank x rank
+            mat_G = torch.reshape(self.G, (self.rank, -1))   # rank x rank^(d-1)
+            
+            # Define Vkron
+            Vkron = None
+            if args.is_dense:
+                for m in range(0, self.tensor.mode-2):
+                    if m == 0:
+                        Vkron = self.V[m].data.unsqueeze(0)  # 1 x j_1 x R
+                    else:
+                        Vkron = batch_kron(Vkron, self.V[m].data.unsqueeze(0))
+                Vkron = Vkron.squeeze()   # j_1*...*j_(d-2) x R^(d-2)
 
-            for i in tqdm(range(0, self.tensor.k, args.tucker_batch_u)):
-                curr_batch_size = min(args.tucker_batch_u, self.tensor.k - i)
-                # declare tensor
-                # Build tensor
-                if args.is_dense:            
-                    curr_tensor = self.set_curr_tensor(curr_batch_size, i)
-                else:                    
-                    curr_rows = list(itertools.chain.from_iterable(self.tensor.rows_list[i: i+curr_batch_size]))
-                    curr_cols = list(itertools.chain.from_iterable(self.tensor.cols_list[i: i+curr_batch_size]))
-                    curr_heights = list(itertools.chain.from_iterable(self.tensor.heights_list[i: i+curr_batch_size]))
-                    curr_heights = [_h - i for _h in curr_heights]
-                    curr_vals = list(itertools.chain.from_iterable(self.tensor.vals_list[i: i+curr_batch_size]))       
+            # Define VtV
+            VtV = None
+            for m in range(0, self.tensor.mode-2):
+                if m == 0:
+                    VtV = torch.mm(self.V[m].data.t(), self.V[m].data).unsqueeze(0)  # 1 x R x R
+                else:
+                    curr_VtV = torch.mm(self.V[m].data.t(), self.V[m].data).unsqueeze(0)  # 1 x R x R
+                    VtV = batch_kron(VtV, curr_VtV)  
+            VtV = VtV.squeeze()  # R^(d-2) x R^(d-2)
 
-                    curr_tensor = torch.sparse_coo_tensor([ curr_heights, curr_rows, curr_cols], curr_vals, (curr_batch_size, self.tensor.i_max, self.tensor.j), device=self.device, dtype=torch.double)  # batch size x i_max x j
+            for i in tqdm(range(0, self.tensor.num_tensor, args.tucker_batch_u)):
+                curr_batch_size = min(args.tucker_batch_u, self.tensor.num_tensor - i)
+                curr_mapping = self.mapping[i:i+curr_batch_size, :]  # bs x i_max
+                curr_mapping_mask = self.mapping_mask[i:i+curr_batch_size, :]  # bs x i_max
+                curr_S = self.S[i:i+curr_batch_size, :]   # bs x R
                 
-                # common features
-                curr_mapping = self.mapping[i:i+curr_batch_size, :]   # batch size x i_max
-                curr_mapping_mask = self.mapping_mask[i:i+curr_batch_size, :]   # batch size x i_max                
-
-                # handle the first mat
-                curr_S = self.S.data[i:i+curr_batch_size, :].unsqueeze(1)   # batch size x 1 x rank                
-                VS = batch_kron(self.V.data.repeat(curr_batch_size, 1, 1), curr_S)   # batch size x J X rank^2
-                VSG = torch.bmm(VS, curr_G.t().repeat(curr_batch_size, 1, 1))    # batch size x J x rank
-                XVSG = torch.bmm(curr_tensor, VSG)   # batch size x i_max x rank
-                temp_mapping = curr_mapping.unsqueeze(-1).expand(-1, -1, self.rank)   # batch size x i_max x rank
-                temp_first_mat = torch.zeros(curr_batch_size, self.tensor.i_max, self.rank, device=self.device, dtype=torch.double)    # batch size x i_max x rank
-                temp_first_mat = temp_first_mat.scatter_add_(1, temp_mapping, XVSG)     # batch size x i_max x rank
-                first_mat = first_mat + torch.sum(temp_first_mat, dim=0)
+                # first mat
+                if args.is_dense:     
+                    curr_S = self.S[i:i+curr_batch_size, :]   # bs x R
+                    XVSG = batch_kron(Vkron.repeat(curr_batch_size, 1, 1), curr_S.unsqueeze(1))  # bs x j_1*...*j_(d-2) x R                 ^(d-1)
+                    XVSG = torch.bmm(XVSG, mat_G.t().repeat(curr_batch_size, 1, 1))   # bs x j_1*...*j_(d-2) x R
+                    curr_tensor = self.set_curr_tensor(curr_batch_size, i)  # batch size x i_max x j_1*j_2*...*j_(d-2)      
+                    XVSG = torch.bmm(curr_tensor, XVSG)   # bs x i_max x R
+                    XVSG = torch.reshape(XVSG, (curr_batch_size*self.tensor.max_first, -1))  # bs*i_max x R                   
+                    first_mat = first_mat.index_add_(0, curr_mapping.flatten(), XVSG)
+                else:                                        
+                    curr_tidx = self.tensor.tidx2start[i]
+                    next_tidx = self.tensor.tidx2start[i + curr_batch_size]
+                    last_idx = self.tensor.indices[-1][curr_tidx:next_tidx]
+                    last_idx = torch.tensor(last_idx, dtype=torch.long, device=self.device)
+                    first_idx = self.tensor.indices[0][curr_tidx:next_tidx]
+                    first_idx = torch.tensor(first_idx, dtype=torch.long, device=self.device)                                  
+                    temp_S = self.S[last_idx, :]   # bs'x rank
+                
+                    XVSG = None   # bs' x rank^(d-2)
+                    for m in range(self.tensor.mode-2):
+                        curr_idx = self.tensor.indices[m+1][curr_tidx:next_tidx]
+                        curr_idx = torch.tensor(curr_idx, dtype=torch.long, device=self.device)
+                        curr_V = self.V[m][curr_idx, :]   # bs' x rank                        
+                        if m == 0:
+                            XVSG = curr_V  # bs' x rank
+                        else:
+                            XVSG = face_split(XVSG, curr_V) 
+                                                            
+                    XVSG = face_split(XVSG, temp_S)   # bs'x rank^(d-1)                    
+                    curr_values = self.tensor.values[curr_tidx:next_tidx]
+                    curr_values = torch.tensor(curr_values, dtype=torch.double, device=self.device)  # bs'
+                    XVSG = curr_values.unsqueeze(-1) * XVSG  # bs'x rank^(d-1)
+                    
+                    XVSG = XVSG @ mat_G.t()   # bs' x rank                     
+                    temp_mapping = self.mapping[last_idx, first_idx]   # bs'
+                    first_mat = first_mat.index_add_(0, temp_mapping, XVSG)   
                 
                 # handle the second mat
-                SS = torch.bmm(torch.transpose(curr_S, 1, 2), curr_S)    # batch size x rank x rank 
-                V2S2 = batch_kron(VtV.repeat(curr_batch_size, 1, 1), SS)   # batch size x rank^2 x rank^2
-                GV2S2 = torch.bmm(curr_G.repeat(curr_batch_size, 1, 1), V2S2)  # batch size x rank x rank^2
-                GV2S2G = torch.bmm(GV2S2, curr_G.t().repeat(curr_batch_size, 1, 1))  # batch size x rank x rank                
-                GV2S2G = GV2S2G.unsqueeze(1).expand(-1, self.tensor.i_max, -1, -1)   # batch size x i_max x rank x rank          
-                GV2S2G = torch.reshape(GV2S2G[curr_mapping_mask, :, :], (-1, self.rank, self.rank))   # small batch x rank x rank                
-                
-                curr_mapping = curr_mapping[curr_mapping_mask]  # small batch
-                red_batch_size = curr_mapping.shape[0]
-                temp_second_mat = torch.zeros(self.tensor.i_max, self.rank, self.rank, device=self.device, dtype=torch.double)   # i_max x rank x rank
-                temp_second_mat = temp_second_mat.index_add_(0, curr_mapping, GV2S2G)   # i_max x rank x rank
-                second_mat = second_mat + temp_second_mat
+                GVSG = torch.bmm(torch.transpose(curr_S.unsqueeze(1), 1, 2), curr_S.unsqueeze(1))    # batch size x rank x rank 
+                GVSG = batch_kron(VtV.repeat(curr_batch_size, 1, 1), GVSG)   # batch size x rank^(d-1) x rank^(d-1)
+                GVSG = torch.bmm(mat_G.repeat(curr_batch_size, 1, 1), GVSG)  # batch size x rank x rank^(d-1)
+                GVSG = torch.bmm(GVSG, mat_G.t().repeat(curr_batch_size, 1, 1))  # batch size x rank x rank                                 
+                GVSG = GVSG.unsqueeze(1).expand(-1, self.tensor.max_first, -1, -1)  # batch size x i_max x rank x rank
+                GVSG = GVSG[curr_mapping_mask]   # small bs x rank x rank
+                curr_mapping = curr_mapping[curr_mapping_mask]  # Small bs                
+                second_mat = second_mat.index_add_(0, curr_mapping, GVSG)
                 
             self.centroids.data = torch.bmm(first_mat.unsqueeze(1), torch.linalg.pinv(second_mat)).squeeze()              
             
@@ -624,9 +654,15 @@ class parafac2:
         prev_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)
         print(f'loss after loaded:{prev_fit}')
                 
-        for e in range(args.epoch_als):
-            self.als_G(args)        
-            #self.als_U(args)
+        for e in range(3):#args.epoch_als):
+            self.als_G(args)                    
+            if args.is_dense:
+                sq_loss = self.L2_loss_tucker_dense(args.batch_size)
+            else:
+                sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
+            curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)   
+            print(f'als epoch: {e+1}, after g:{curr_fit}')
+            self.als_U(args)
             #self.als_G(args)            
             #self.als_V(args)
             #self.als_G(args)                   
@@ -637,13 +673,13 @@ class parafac2:
             else:
                 sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
             curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)            
-            with open(args.output_path + ".txt", 'a') as f:
-                f.write(f'als epoch: {e+1}, after s:{curr_fit}\n')
+            #with open(args.output_path + ".txt", 'a') as f:
+            #    f.write(f'als epoch: {e+1}, after s:{curr_fit}\n')
             print(f'als epoch: {e+1}, after s:{curr_fit}')
             
-            if curr_fit - prev_fit < 1e-4:                 
-                break
-            prev_fit = curr_fit
+            #if curr_fit - prev_fit < 1e-4:                 
+            #    break
+            #prev_fit = curr_fit
         
         '''
         torch.save({
