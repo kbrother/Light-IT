@@ -44,7 +44,7 @@ class parafac2:
             _H = torch.rand((self.rank, self.rank), device=self.device, dtype=torch.double)        
             if is_dense:
                 Vprod = self.V[0]
-                for m in range(1, self.tensor.mode-2):
+                for m in range(1, self.tensor.order-2):
                     Vprod = khatri_rao(Vprod, self.V[m])   # row2 * rows3 *.... x rank
                 
             for i in tqdm(range(self.tensor.num_tensor)):                                
@@ -62,11 +62,11 @@ class parafac2:
                     curr_tidx = self.tensor.tidx2start[i]
                     next_tidx = self.tensor.tidx2start[i + 1]
                     _V = torch.ones((next_tidx - curr_tidx, self.rank), device=self.device, dtype=torch.double)   # curr nnz x rank
-                    for m in range(self.tensor.mode - 2):
+                    for m in range(self.tensor.order - 2):
                         curr_idx = torch.tensor(self.tensor.indices[m + 1][curr_tidx:next_tidx], dtype=torch.long, device=self.device)
                         _V = _V * self.V[m][curr_idx, :]
                     
-                    curr_idx = torch.tensor(self.tensor.indices[self.tensor.mode - 1][curr_tidx:next_tidx], dtype=torch.long, device=self.device)
+                    curr_idx = torch.tensor(self.tensor.indices[self.tensor.order - 1][curr_tidx:next_tidx], dtype=torch.long, device=self.device)
                     VS = _V * self.S[curr_idx, :]   # curr nnz x rank
                     curr_X = torch.tensor(self.tensor.values[curr_tidx:next_tidx], device=self.device, dtype=torch.double)
                     XVS_raw = curr_X.unsqueeze(1) * VS  # curr nnz x rank                
@@ -84,7 +84,7 @@ class parafac2:
             _lambda = torch.sqrt(torch.sum(torch.square(_H), dim=0))  # R
             _H = _H / _lambda.unsqueeze(0)
             
-            for m in range(self.tensor.mode-2):
+            for m in range(self.tensor.order-2):
                 curr_lambda = torch.sqrt(torch.sum(torch.square(self.V[m]), dim=0))
                 _lambda = _lambda * curr_lambda
                 self.V[m] = self.V[m] / curr_lambda.unsqueeze(0)
@@ -93,9 +93,9 @@ class parafac2:
             _lambda = _lambda * curr_lambda
             self.S = self.S / curr_lambda.unsqueeze(0)
             
-            _lambda = torch.pow(_lambda, 1/self.tensor.mode)
+            _lambda = torch.pow(_lambda, 1/self.tensor.order)
             _H = _H * _lambda.unsqueeze(0)
-            for m in range(self.tensor.mode-2):
+            for m in range(self.tensor.order-2):
                 self.V[m] = self.V[m] * _lambda.unsqueeze(0)
             self.S = self.S * _lambda.unsqueeze(0)
             
@@ -124,7 +124,7 @@ class parafac2:
         self.U = scale_factor * torch.rand((_tensor.num_tensor, _tensor.max_first, self.rank), device=device, dtype=torch.double)  # k x i_max x rank        
         self.U = self.U * self.U_mask          
         self.V = []
-        for m in range(self.tensor.mode-2):
+        for m in range(self.tensor.order-2):
             curr_dim = _tensor.middle_dim[m]
             self.V.append(scale_factor * torch.rand((curr_dim, self.rank), device=device, dtype=torch.double))  # j x rank
         self.S = scale_factor * torch.rand((_tensor.num_tensor, self.rank), device=device, dtype=torch.double)      # k x rank        
@@ -135,7 +135,7 @@ class parafac2:
         self.centroids = torch.nn.Parameter(self.centroids)                      
         self.U = torch.nn.Parameter(self.U)
         self.S = torch.nn.Parameter(self.S)
-        for m in range(_tensor.mode-2):
+        for m in range(_tensor.order-2):
             self.V[m] = torch.nn.Parameter(self.V[m])
         
         with torch.no_grad():
@@ -153,7 +153,7 @@ class parafac2:
     def L2_loss_dense(self, is_train, batch_size, input_U):
         _loss = 0
         Vprod = self.V[0]
-        for i in range(1, self.tensor.mode-2):
+        for i in range(1, self.tensor.order-2):
             Vprod = khatri_rao(Vprod, self.V[i]).unsqueeze(0)   # 1 x i_2 * ... * i_(m-1) x rank        
             
         for i in range(0, self.tensor.num_tensor, batch_size):                        
@@ -182,7 +182,7 @@ class parafac2:
     def L2_loss(self, is_train, batch_size, input_U):                
         # zero terms             
         VtV = torch.ones((self.rank, self.rank), device=self.device, dtype=torch.double)  # r x r
-        for i in range(self.tensor.mode-2):
+        for i in range(self.tensor.order-2):
             VtV = VtV * (self.V[i].t() @ self.V[i])  # r x r
             
         UtU = torch.bmm(torch.transpose(input_U, 1, 2), input_U) # k x rank x rank
@@ -200,7 +200,7 @@ class parafac2:
             final_idx = torch.tensor(self.tensor.indices[-1][i: i+curr_batch_size], device=self.device, dtype=torch.long)  # bs
             
             approx = input_U[final_idx, first_idx, :] * self.S[final_idx, :]  # bs x rank
-            for m in range(1, self.tensor.mode-1):
+            for m in range(1, self.tensor.order-1):
                 curr_idx = torch.tensor(self.tensor.indices[m][i: i+curr_batch_size], device=self.device, dtype=torch.long)
                 approx = approx * self.V[m-1][curr_idx, :]   # bs x rank
             
@@ -274,7 +274,7 @@ class parafac2:
         self.centroids.data.copy_(final_cents.to(self.device))
         self.U.data.copy_(final_U.to(self.device))
         
-        for m in range(self.tensor.mode-2):
+        for m in range(self.tensor.order-2):
             self.V[m].data.copy_(final_V[m].to(self.device))
         self.S.data.copy_(final_S.to(self.device))
                 
@@ -292,7 +292,7 @@ class parafac2:
         self.mapping_mask = torch.zeros(self.tensor.num_tensor, self.tensor.max_first, dtype=torch.bool, device=self.device)   # k x i_max
         for _k in range(self.tensor.num_tensor):        
             self.mapping_mask[_k, :self.tensor.first_dim[_k]] = True
-        self.G = torch.zeros([self.rank]*self.tensor.mode, device=self.device, dtype=torch.double)    
+        self.G = torch.zeros([self.rank]*self.tensor.order, device=self.device, dtype=torch.double)    
         self.G = self.G.fill_diagonal_(1)
         
         
@@ -303,7 +303,7 @@ class parafac2:
     '''
     def compute_irregular_tucker(self, input_U, indices):
         first_mat = input_U[indices[-1], indices[0], :]  # batch size x rank
-        for m in range(self.tensor.mode-2):            
+        for m in range(self.tensor.order-2):            
             first_mat = face_split(first_mat, self.V[m][indices[m+1], :])  
         
         first_mat = face_split(first_mat, self.S[indices[-1], :])   # batch size x rank...
@@ -317,7 +317,7 @@ class parafac2:
             input_U = self.centroids[self.mapping] * self.U_mask  # k x i_max x rank
 
             # compute zero terms                    
-            for m in range(self.tensor.mode-2):
+            for m in range(self.tensor.order-2):
                 if m == 0: 
                     middle_mat = torch.mm(self.V[m].t(), self.V[m]).unsqueeze(0)
                 else:
@@ -340,7 +340,7 @@ class parafac2:
             for i in tqdm(range(0, self.tensor.num_nnz, batch_loss_nz)):
                 curr_batch_size = min(self.tensor.num_nnz - i, batch_loss_nz)                
                 # Prepare matrices
-                curr_indices = [torch.tensor(self.tensor.indices[m][i:i+curr_batch_size], dtype=torch.long, device=self.device) for m in range(self.tensor.mode)]                
+                curr_indices = [torch.tensor(self.tensor.indices[m][i:i+curr_batch_size], dtype=torch.long, device=self.device) for m in range(self.tensor.order)]                
                 curr_vals = torch.tensor(self.tensor.values[i:i+curr_batch_size], dtype=torch.double, device=self.device)
 
                 _approx = self.compute_irregular_tucker(input_U, curr_indices)
@@ -361,8 +361,8 @@ class parafac2:
                 
     def L2_loss_tucker_dense(self, batch_size):
         _loss = 0
-        print(self.tensor.mode)
-        for m in range(self.tensor.mode-2):
+        print(self.tensor.order)
+        for m in range(self.tensor.order-2):
             if m == 0:
                 VKron = self.V[m].data.unsqueeze(0)  # 1 x j_1 x R
             else:
@@ -399,7 +399,7 @@ class parafac2:
             # Define Vkron
             Vkron = None
             if args.is_dense:
-                for m in range(0, self.tensor.mode-2):
+                for m in range(0, self.tensor.order-2):
                     if m == 0:
                         Vkron = self.V[m].data.unsqueeze(0)  # 1 x j_1 x R
                     else:
@@ -408,7 +408,7 @@ class parafac2:
 
             # Define VtV
             VtV = None
-            for m in range(0, self.tensor.mode-2):
+            for m in range(0, self.tensor.order-2):
                 if m == 0:
                     VtV = torch.mm(self.V[m].data.t(), self.V[m].data).unsqueeze(0)  # 1 x R x R
                 else:
@@ -441,7 +441,7 @@ class parafac2:
                     temp_S = self.S[last_idx, :]   # bs'x rank
                 
                     XVSG = None   # bs' x rank^(d-2)
-                    for m in range(self.tensor.mode-2):
+                    for m in range(self.tensor.order-2):
                         curr_idx = self.tensor.indices[m+1][curr_tidx:next_tidx]
                         curr_idx = torch.tensor(curr_idx, dtype=torch.long, device=self.device)
                         curr_V = self.V[m][curr_idx, :]   # bs' x rank                        
@@ -472,8 +472,7 @@ class parafac2:
             self.centroids.data = torch.bmm(first_mat.unsqueeze(1), torch.linalg.pinv(second_mat)).squeeze()              
             
             
-    def als_V(self, args):    
-        #print(U_clustered.shape)        
+    def als_V(self, args, mode):            
         with torch.no_grad():
             mat_G = torch.reshape(torch.transpose(self.G.data, 0, 1), (self.rank, -1))   # R x R^2
             front_mat, end_mat = 0, 0
@@ -563,8 +562,8 @@ class parafac2:
             third_mat = 0    # R^(d-1) x R^(d-1)
             
             # define VtV
-            if self.tensor.mode > 3:
-                for m in range(1, self.tensor.mode-2):            
+            if self.tensor.order > 3:
+                for m in range(1, self.tensor.order-2):            
                     if m == 1:
                         VtV = self.V[m].t()@self.V[m]
                     else:
@@ -574,7 +573,7 @@ class parafac2:
 
                 # define Vkron
                 if args.is_dense:
-                    for m in range(1, self.tensor.mode-2):
+                    for m in range(1, self.tensor.order-2):
                         if m == 1:
                             Vkron = self.V[m].unsqueeze(0)
                         else:
@@ -593,7 +592,7 @@ class parafac2:
                     curr_tensor = self.tensor.src_tensor_torch[i:i+curr_batch_size].to(self.device)  # bs x i_max x i_2 x ... x i_(m-1)  
                     curr_tensor = torch.transpose(curr_tensor, 1, 2)   # bs x i_2 x i_max x ... x i_(m-1)  
                     curr_tensor = torch.reshape(curr_tensor, (curr_batch_size, self.tensor.middle_dim[0], -1))   # bs x i_2 x ....
-                    if self.tensor.mode >= 4:
+                    if self.tensor.order >= 4:
                         UVS = batch_kron(curr_U, Vkron.repeat(curr_batch_size, 1, 1))  # batch_size x i_max*j_2*...*j_(m-2) x rank^(d-2)
                     else:
                         UVS = curr_U # batch size x i_max x rank
@@ -610,7 +609,7 @@ class parafac2:
                     curr_li = torch.tensor(curr_li, dtype=torch.long, device=self.device)
                     
                     XUVS = curr_U.data[curr_li - i, curr_fi, :]   # bs' x rank
-                    for m in range(2, self.tensor.mode-1):
+                    for m in range(2, self.tensor.order-1):
                         curr_idx = self.tensor.indices[m][curr_tidx:next_tidx]
                         curr_idx = torch.tensor(curr_idx, dtype=torch.long, device=self.device)
                         _V = self.V[m-1][curr_idx, :].data     # bs' x rank
@@ -623,7 +622,7 @@ class parafac2:
                     curr_idx = self.tensor.indices[1][curr_tidx:next_tidx]
                     curr_idx = torch.tensor(curr_idx, dtype=torch.long, device=self.device)                                       
                     curr_idx = (curr_li - i)*self.tensor.middle_dim[0] + curr_idx   # bs'
-                    temp_second_mat = torch.zeros((curr_batch_size*self.tensor.middle_dim[0], self.rank**(self.tensor.mode-1)), device=self.device, dtype=torch.double)   # bs*j_1 x R^(d-1)
+                    temp_second_mat = torch.zeros((curr_batch_size*self.tensor.middle_dim[0], self.rank**(self.tensor.order-1)), device=self.device, dtype=torch.double)   # bs*j_1 x R^(d-1)
                     
                     temp_second_mat = temp_second_mat.index_add_(0, curr_idx, XUVS)   #  # bs*j_1 x R^(d-1)
                     temp_second_mat = torch.reshape(temp_second_mat, (curr_batch_size, self.tensor.middle_dim[0], -1))                    
@@ -631,7 +630,7 @@ class parafac2:
                 
                 # third mat
                 temp_third_mat = torch.bmm(torch.transpose(curr_U, 1, 2), curr_U)  # batch size x R x R                
-                if self.tensor.mode > 3:
+                if self.tensor.order > 3:
                     temp_third_mat = batch_kron(temp_third_mat, VtV.repeat(curr_batch_size, 1, 1)) # batch size x R^(d-2) x R^(d-2)                
                 StS = torch.bmm(torch.transpose(curr_S, 1, 2), curr_S)  # batch size x R x R                             
                 temp_third_mat = batch_kron(temp_third_mat, StS)   # batch size x R^(d-1) x R^(d-1)                
@@ -640,7 +639,7 @@ class parafac2:
             second_mat = torch.mm(self.V[0].data.t(), second_mat)  # R x R^(d-1)
             third_mat = torch.linalg.pinv(third_mat)   # R^(d-1) x R^(d-1)
             self.G.data = first_mat @ second_mat @ third_mat  # R x R^(d-1)
-            orig_shape = tuple(self.rank for _ in range(self.tensor.mode))
+            orig_shape = tuple(self.rank for _ in range(self.tensor.order))
             self.G.data = torch.reshape(self.G.data, orig_shape)
             self.G.data = torch.transpose(self.G.data, 0, 1)
             

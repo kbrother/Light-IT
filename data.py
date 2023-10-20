@@ -11,7 +11,7 @@ class irregular_tensor:
             # Initialize variable
             self.src_tensor = np.load(input_path, allow_pickle=True)
             self.num_tensor = len(self.src_tensor)
-            self.mode = len(self.src_tensor[0].shape) + 1
+            self.order = len(self.src_tensor[0].shape) + 1
             self.middle_dim = self.src_tensor[0].shape[1:] 
             self.first_dim = np.array([self.src_tensor[_i].shape[0] for _i in range(self.num_tensor)])
             self.max_first = np.max(self.first_dim)
@@ -31,14 +31,14 @@ class irregular_tensor:
             self.indices = raw_dict['idx']
             self.num_nnz = len(self.indices[0])
             self.values = np.array(raw_dict['val'])
-            self.mode = len(self.indices)
+            self.order = len(self.indices)
             
             # sort indices            
-            for m in range(self.mode):
+            for m in range(self.order):
                 self.indices[m] = np.array(self.indices[m])
             
             idx2newidx = np.argsort(self.indices[-1])
-            for m in range(self.mode):
+            for m in range(self.order):
                 self.indices[m] = self.indices[m][idx2newidx]
             self.values = self.values[idx2newidx]            
             
@@ -46,7 +46,7 @@ class irregular_tensor:
             self.max_first = max(self.indices[0]) + 1
             self.num_tensor = max(self.indices[-1]) + 1
             self.middle_dim = []
-            for m in range(1, self.mode-1):
+            for m in range(1, self.order-1):
                 self.middle_dim.append(max(self.indices[m]) + 1)                                                                                                      
             self.sq_sum = np.sum(self.values**2)            
             self.tidx2start = [0]
