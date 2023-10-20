@@ -474,38 +474,85 @@ class parafac2:
             
     def als_V(self, args, mode):            
         with torch.no_grad():
-            mat_G = torch.reshape(torch.transpose(self.G.data, 0, 1), (self.rank, -1))   # R x R^2
-            front_mat, end_mat = 0, 0
-            for i in tqdm(range(0, self.tensor.k, args.tucker_batch_v)):
-                curr_batch_size = min(args.tucker_batch_v, self.tensor.k - i)        
+            # Define mat_G
+            perm_dims = [mode] + [m for m in range(self.tensor.order) if m != mode]
+            mat_G = torch.reshape(torch.permute(self.G.data, perm_dims), (self.rank, -1))   # R x R^(d-1)                
+            # define VtV
+            VtV = None
+            if self.tensor.order > 3:
+                _cnt = 0
+                for m in range(1, self.tensor.order-1): 
+                    if m == mode: continue
+                    if _cnt == 0:
+                        VtV = (self.V[m-1].t()@self.V[m-1]).unsqueeze(0)
+                    else:
+                        VtV = batch_kron(VtV, (self.V[m-1].t()@self.V[m-1]).unsqueeze(0))            
+                    _cnt += 1
+                VtV = VtV.squeeze()  
+                # rank^(d-3) x rank^(d-3)
+                
+            first_mat = torch.zeros((self.tensor.middle_dim[mode-1], self.rank), dtype=torch.double, device=self.device) # j_m x R
+            second_mat = 0
+            for i in tqdm(range(0, self.tensor.num_tensor, args.tucker_batch_v)):                
+                # Build the first mat
+                curr_batch_size = min(args.tucker_batch_v, self.tensor.num_tensor - i)        
+                curr_mapping = self.mapping[i:i+curr_batch_size, :]   # batch size x i_max
+                curr_U = self.centroids.data[curr_mapping] * self.U_mask[i:i+curr_batch_size, :, :]   # batch size x i_max x R
+                curr_S = self.S[i:i+curr_batch_size, :]  # bs x R
+                
                 if args.is_dense:
                     curr_tensor = self.set_curr_tensor(curr_batch_size, i)
                     curr_tensor = torch.transpose(curr_tensor, 1, 2)   # batch size x j x i_max
-                else:                                                
-                    # Build tensor
-                    curr_rows = list(itertools.chain.from_iterable(self.tensor.rows_list[i: i+curr_batch_size]))
-                    curr_cols = list(itertools.chain.from_iterable(self.tensor.cols_list[i: i+curr_batch_size]))
-                    curr_heights = list(itertools.chain.from_iterable(self.tensor.heights_list[i: i+curr_batch_size]))
-                    curr_heights = [_h - i for _h in curr_heights]
-                    curr_vals = list(itertools.chain.from_iterable(self.tensor.vals_list[i: i+curr_batch_size]))                
-                    curr_tensor = torch.sparse_coo_tensor([curr_heights, curr_cols, curr_rows], curr_vals, (curr_batch_size, self.tensor.j, self.tensor.i_max), device=self.device, dtype=torch.double)  # batch size x j x i_max
-
-                # Build front mat
-                curr_mapping = self.mapping[i:i+curr_batch_size, :]   # batch size x i_max
-                curr_U = self.centroids.data[curr_mapping] * self.U_mask[i:i+curr_batch_size, :, :]   # batch size x i_max x R                
-                curr_S = self.S.data[i:i+curr_batch_size, :].unsqueeze(1)  # batch size x 1 x R
-                US = batch_kron(curr_U, curr_S)  # batch size x i_max x R^2
-                curr_front_mat = torch.bmm(curr_tensor, US)    # batch size x j x R^2
-                front_mat = front_mat + torch.sum(torch.bmm(curr_front_mat, torch.transpose(mat_G, 0, 1).repeat(curr_batch_size, 1, 1,)), dim=0)   # j x R
-
-                # Build end mat                  # batch size x i_max x R
-                UtU = torch.bmm(torch.transpose(curr_U, 1, 2), curr_U)  # batch size x R x R
-                StS = torch.bmm(torch.transpose(curr_S, 1, 2), curr_S) # batch size x R x R
-                end_mat = end_mat + torch.sum(batch_kron(UtU, StS) , dim=0)   # R^2 x R^2
-            
-            end_mat = torch.mm(torch.mm(mat_G, end_mat), mat_G.t())   # R X R
-            end_mat = torch.linalg.pinv(end_mat)
-            self.V.data = torch.mm(front_mat, end_mat)
+                    
+                    # Build front mat
+                    curr_mapping = self.mapping[i:i+curr_batch_size, :]   # batch size x i_max
+                    curr_U = self.centroids.data[curr_mapping] * self.U_mask[i:i+curr_batch_size, :, :]   # batch size x i_max x R                
+                    curr_S = self.S.data[i:i+curr_batch_size, :].unsqueeze(1)  # batch size x 1 x R
+                    US = batch_kron(curr_U, curr_S)  # batch size x i_max x R^2
+                    curr_front_mat = torch.bmm(curr_tensor, US)    # batch size x j x R^2
+                    front_mat = front_mat + torch.sum(torch.bmm(curr_front_mat, torch.transpose(mat_G, 0, 1).repeat(curr_batch_size, 1, 1,)), dim=0)   # j x R
+                else:                                                                    
+                    curr_tidx = self.tensor.tidx2start[i]
+                    next_tidx = self.tensor.tidx2start[i + curr_batch_size]
+                    
+                    first_idx = self.tensor.indices[0][curr_tidx:next_tidx]   # bs'
+                    first_idx = torch.tensor(first_idx, dtype=torch.long, device=self.device)  # bs'
+                    last_idx = self.tensor.indices[-1][curr_tidx:next_tidx]   # bs'
+                    last_idx = torch.tensor(last_idx, dtype=torch.long, device=self.device)  # bs'
+                    XUVS = curr_U[last_idx - i, first_idx, :]  # bs' x R
+                    
+                    for m in range(1, self.tensor.order - 1):
+                        if m == mode: continue
+                        else:
+                            curr_idx = self.tensor.indices[m][curr_tidx:next_tidx]        
+                            curr_idx = torch.tensor(curr_idx, dtype=torch.long, device=self.device)  # bs'                            
+                            XUVS = face_split(XUVS, self.V[m-1][curr_idx, :])   
+                                    
+                    #print(XUVS.shape)
+                    #print(self.V[-1][curr_idx,:].shape)
+                    XUVS = face_split(XUVS, self.S[last_idx, :])   # bs' x R^(d-1)
+                    
+                    curr_values = self.tensor.values[curr_tidx:next_tidx]   # bs'
+                    curr_values = torch.tensor(curr_values, dtype=torch.double, device=self.device)  # bs'
+                    XUVS = curr_values.unsqueeze(-1) * XUVS  # bs' x R^(d-1)
+                    temp_first_mat = XUVS @ mat_G.t()   # bs' x R
+                    
+                    curr_idx = self.tensor.indices[mode][curr_tidx:next_tidx]  # bs'
+                    curr_idx = torch.tensor(curr_idx, dtype=torch.long, device=self.device)  # bs'
+                    first_mat = first_mat.index_add_(0, curr_idx, temp_first_mat)  # j_m x R
+                
+                # Build second mat                  
+                curr_sm = torch.bmm(torch.transpose(curr_U, 1, 2), curr_U)  # batch size x R x R
+                if self.tensor.order > 3:
+                    curr_sm = batch_kron(curr_sm, VtV.repeat(curr_batch_size, 1, 1))
+                
+                StS = torch.bmm(torch.transpose(curr_S.unsqueeze(1), 1, 2), curr_S.unsqueeze(1)) # batch size x R x R            
+                curr_sm = batch_kron(curr_sm, StS)   # bathc size x R^(d-1) x R^(d-1)
+                second_mat = second_mat + torch.sum(curr_sm, dim=0)   # R x R
+                        
+            second_mat = mat_G @ second_mat @ mat_G.t()   # R X R
+            second_mat = torch.linalg.pinv(second_mat)
+            self.V[mode-1].data = first_mat @ second_mat
             
                 
     def als_S(self, args):        
@@ -654,27 +701,29 @@ class parafac2:
         print(f'loss after loaded:{prev_fit}')
                 
         for e in range(3):#args.epoch_als):
-            self.als_G(args)                    
-            if args.is_dense:
-                sq_loss = self.L2_loss_tucker_dense(args.batch_size)
-            else:
-                sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
-            curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)   
-            print(f'als epoch: {e+1}, after g:{curr_fit}')
+            self.als_G(args)                                
             self.als_U(args)
-            #self.als_G(args)            
-            #self.als_V(args)
+            
+            for m in range(1, self.tensor.order-1):
+                self.als_G(args)            
+                if args.is_dense:
+                    sq_loss = self.L2_loss_tucker_dense(args.batch_size)
+                else:
+                    sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
+                curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)   
+                print(f'als epoch: {e+1}, after g:{curr_fit}')
+                self.als_V(args, m)
             #self.als_G(args)                   
             #self.als_S(args)
                         
-            if args.is_dense:
-                sq_loss = self.L2_loss_tucker_dense(args.batch_size)
-            else:
-                sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
-            curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)            
-            #with open(args.output_path + ".txt", 'a') as f:
-            #    f.write(f'als epoch: {e+1}, after s:{curr_fit}\n')
-            print(f'als epoch: {e+1}, after s:{curr_fit}')
+                if args.is_dense:
+                    sq_loss = self.L2_loss_tucker_dense(args.batch_size)
+                else:
+                    sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
+                curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)            
+                #with open(args.output_path + ".txt", 'a') as f:
+                #    f.write(f'als epoch: {e+1}, after s:{curr_fit}\n')
+                print(f'als epoch: {e+1}, after v:{curr_fit}')
             
             #if curr_fit - prev_fit < 1e-4:                 
             #    break
