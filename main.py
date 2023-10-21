@@ -9,7 +9,7 @@ import numpy as np
 
 # python main.py test_loss -tp ../data/23-Irregular-Tensor/test.pickle -de 1 -r 10 -d False
 # python main.py test_loss -tp ../data/23-Irregular-Tensor/test.npy -de 1 -r 10 -d True
-# python main.py train -tp ../data/23-Irregular-Tensor/delicious.pickle -op results/delicious -r 5 -d False -de 0 -e 10 -lr 0.1
+# python main.py train -tp ../data/23-Irregular-Tensor/delicious.pickle -op results/delicious_r5 -r 5 -d False -de 4 -e 500 -lr 0.01
 # python main.py train -tp ../data/23-Irregular-Tensor/cms.pickle -op results/cms -r 5 -d False -de 0 -e 10 -lr 0.1
 # python main.py train -tp ../data/23-Irregular-Tensor/action.npy -op results/action -r 5 -d True -de 0 -e 10 -lr 0.1
 if __name__ == '__main__':
@@ -46,12 +46,12 @@ if __name__ == '__main__':
         
     parser.add_argument(
         "-cb", "--cluster_batch",
-        action="store", default=64, type=int
+        action="store", default=128, type=int
     )
     
     parser.add_argument(
         "-tbz", "--tucker_batch_lossz",
-        action="store", default=2**6, type=int
+        action="store", default=2**7, type=int
     )
     
     parser.add_argument(
@@ -61,22 +61,22 @@ if __name__ == '__main__':
     
     parser.add_argument(
         "-tbu", "--tucker_batch_u",
-        action="store", default=2**5, type=int
+        action="store", default=2**7, type=int
     )
         
     parser.add_argument(
         "-tbv", "--tucker_batch_v",
-        action="store", default=2**6, type=int
+        action="store", default=2**7, type=int
     )
     
     parser.add_argument(
         "-tbs", "--tucker_batch_s",
-        action="store", default=2**2, type=int
+        action="store", default=2**7, type=int
     )
     
     parser.add_argument(
         "-tbg", "--tucker_batch_g",
-        action="store", default=2**6, type=int
+        action="store", default=2**7, type=int
     )
     
     torch.manual_seed(3)
