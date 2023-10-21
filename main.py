@@ -36,7 +36,7 @@ if __name__ == '__main__':
     )
     
     parser.add_argument(
-        "-eh", "--epoch_als",
+        "-ea", "--epoch_als",
         action="store", type=int, default=500
     )
     

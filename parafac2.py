@@ -742,7 +742,7 @@ class parafac2:
         prev_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)
         print(f'loss after loaded:{prev_fit}')
                 
-        for e in range(3):#args.epoch_als):
+        for e in range(args.epoch_als):
             self.als_G(args)                                
             self.als_U(args)
             
@@ -766,11 +766,9 @@ class parafac2:
                 break
             prev_fit = curr_fit
         
-        '''
         torch.save({
             'fitness': curr_fit, 'mapping': self.mapping,
             'centroids': self.centroids, 'U': self.U.data,
             'S': self.S, 'V': self.V, 'G': self.G
-        }, args.output_path + ".pt")
-        '''
+        }, args.output_path + ".pt")        
         
