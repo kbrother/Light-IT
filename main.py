@@ -51,7 +51,7 @@ if __name__ == '__main__':
     
     parser.add_argument(
         "-tbz", "--tucker_batch_lossz",
-        action="store", default=2**7, type=int
+        action="store", default=2**4, type=int
     )
     
     parser.add_argument(
@@ -94,20 +94,33 @@ if __name__ == '__main__':
     device = torch.device("cuda:" + str(args.device))
     _tensor = irregular_tensor(args.tensor_path, args.is_dense)
     print("load finish")
-    
-    _parafac2 = parafac2(_tensor, device, args)        
+            
     if args.action == "train":
-        _parafac2.quantization(args)        
+        if os.path.exists(args.output_path + "_cp.pt"):            
+            _parafac2 = parafac2(_tensor, device, False, args)                
+            state_dict = torch.load(args.output_path + "_cp.pt", map_location=device)
+            _parafac2.centroids.data.copy_(state_dict['centroids'])
+            _parafac2.U.data.copy_(state_dict['U'])
+
+            for m in range(_tensor.order-2):
+                _parafac2.V[m].data.copy_(state_dict['V'][m].to(device))
+            _parafac2.S.data.copy_(state_dict['S'])
+
+        else:
+            _parafac2 = parafac2(_tensor, device, True, args)
+            _parafac2.quantization(args)        
         _parafac2.als(args)
     elif args.action == "test_loss":
+        _parafac2 = parafac2(_tensor, device, True, args)
         with torch.no_grad():
             if args.is_dense:
                 print(f'dense: {_parafac2.L2_loss_dense(False, args.batch_size, _parafac2.U)}')
             else:
                 print(f'sparse: {_parafac2.L2_loss(False, args.batch_size, _parafac2.U)}')            
     elif args.action == "test_tucker_loss":
+        _parafac2 = parafac2(_tensor, device, True, args)
         _parafac2.init_tucker(args)        
-        _parafac2.G = torch.rand([_parafac2.rank]*_tensor.mode, device=_parafac2.device, dtype=torch.double)   
+        _parafac2.G = torch.rand([_parafac2.rank]*_tensor.order, device=_parafac2.device, dtype=torch.double)   
         if args.is_dense:
             sq_loss = _parafac2.L2_loss_tucker_dense(args.tucker_batch_lossnz)
             print(f'dense: {sq_loss}')

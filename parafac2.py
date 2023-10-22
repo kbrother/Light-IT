@@ -108,14 +108,14 @@ class parafac2:
         print(torch.mean(torch.abs(UTU - HTH.unsqueeze(0))))        
             
 
-    def __init__(self, _tensor, device, args):      
+    def __init__(self, _tensor, device, require_init, args):      
         # Intialization
         self.device = device
         self.tensor = _tensor
         if args.is_dense:
             scale_factor = 1
         else:
-            scale_factor = 0.01
+            scale_factor = 1
         self.U_mask = torch.zeros((_tensor.num_tensor, _tensor.max_first, args.rank), device=device, dtype=torch.double)   # k x i_max x rank, 1 means the valid area
         for _k in range(_tensor.num_tensor):
             self.U_mask[_k, :_tensor.first_dim[_k], :] = 1
@@ -128,7 +128,8 @@ class parafac2:
             curr_dim = _tensor.middle_dim[m]
             self.V.append(scale_factor * torch.rand((curr_dim, self.rank), device=device, dtype=torch.double))  # j x rank
         self.S = scale_factor * torch.rand((_tensor.num_tensor, self.rank), device=device, dtype=torch.double)      # k x rank        
-        self.init_factor(args.is_dense)        
+        if require_init:
+            self.init_factor(args.is_dense)        
 
         # Upload to gpu        
         self.centroids = scale_factor * torch.rand((_tensor.max_first, self.rank), device=device, dtype=torch.double)    # cluster centers,  i_max x rank
@@ -316,25 +317,31 @@ class parafac2:
         with torch.no_grad():
             input_U = self.centroids[self.mapping] * self.U_mask  # k x i_max x rank
 
-            # compute zero terms                    
+            # compute zero terms 
+            VtV = None
             for m in range(self.tensor.order-2):
                 if m == 0: 
-                    middle_mat = torch.mm(self.V[m].t(), self.V[m]).unsqueeze(0)
+                    VtV = torch.mm(self.V[m].t(), self.V[m]).unsqueeze(0)
                 else:
-                    middle_mat = batch_kron(middle_mat, torch.mm(self.V[m].t(), self.V[m]).unsqueeze(0))                   
-            middle_mat = middle_mat.squeeze()   # rank x rank
+                    VtV = batch_kron(VtV, torch.mm(self.V[m].t(), self.V[m]).unsqueeze(0))                   
+            VtV = VtV.squeeze()   # rank x rank
             StS = torch.matmul(self.S.unsqueeze(-1), self.S.unsqueeze(1))  # k x rank x rank
-            mat_G = self.G.reshape(self.rank, -1)   # rank x rank^2             
+            
+            perm_G = tuple([0, self.tensor.order-1] + [m for m in range(1, self.tensor.order-1)])
+            vec_G = torch.permute(self.G, perm_G)
+            vec_G = vec_G.flatten()
             sq_loss = 0       
             
+            US = 0  # rank^2 x rank^2
             for i in tqdm(range(0, self.tensor.num_tensor, batch_loss_zero)):
-                curr_num_k = min(self.tensor.num_tensor - i, batch_loss_zero)
-                UG = torch.bmm(input_U[i:i+curr_num_k, :, :], mat_G.repeat(curr_num_k, 1, 1))   # batch size x i_max x rank^2          
-                curr_mmat = batch_kron(middle_mat.repeat(curr_num_k, 1, 1), StS[i:i+curr_num_k, :, :])   # batch size x rank^2 x rank^2
-                #print(UG.shape)
-                #print(curr_mmat.shape)
-                curr_mmat = torch.bmm(UG, curr_mmat)   # batch size x i_max x rank^2
-                sq_loss = sq_loss + torch.sum(curr_mmat * UG).item()  # batch size
+                curr_batch_size = min(self.tensor.num_tensor - i, batch_loss_zero)
+                curr_U = input_U[i:i+curr_batch_size, :, :]    # batch size x i_max x rank
+                curr_US = torch.bmm(torch.transpose(curr_U, 1, 2), curr_U)   # batch size x rank x rank
+                curr_US = batch_kron(curr_US, StS[i:i+curr_batch_size, :, :])    # batch size x rank^2 x rank^2
+                US = US + torch.sum(curr_US, dim=0)            
+            USV = batch_kron(US.unsqueeze(0), VtV.unsqueeze(0))   # rank^d x rank^d
+            sq_loss = vec_G.unsqueeze(0) @ USV.squeeze() @ vec_G.unsqueeze(-1) 
+            sq_loss = sq_loss.squeeze().item()
             
             # Correct non-zero terms
             for i in tqdm(range(0, self.tensor.num_nnz, batch_loss_nz)):
@@ -768,7 +775,7 @@ class parafac2:
         
         torch.save({
             'fitness': curr_fit, 'mapping': self.mapping,
-            'centroids': self.centroids, 'U': self.U.data,
-            'S': self.S, 'V': self.V, 'G': self.G
+            'centroids': self.centroids.dadta, 'U': self.U.data,
+            'S': self.S.data, 'V': self.V.data, 'G': self.G.data
         }, args.output_path + ".pt")        
         
