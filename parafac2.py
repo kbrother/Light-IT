@@ -115,7 +115,7 @@ class parafac2:
         if args.is_dense:
             scale_factor = 1
         else:
-            scale_factor = 0.01
+            scale_factor = 1
         self.U_mask = torch.zeros((_tensor.num_tensor, _tensor.max_first, args.rank), device=device, dtype=torch.double)   # k x i_max x rank, 1 means the valid area
         for _k in range(_tensor.num_tensor):
             self.U_mask[_k, :_tensor.first_dim[_k], :] = 1
@@ -316,36 +316,40 @@ class parafac2:
         return approx
     
     
-    def L2_loss_tucker(self, batch_loss_zero, batch_loss_nz):        
+    def L2_loss_tucker(self, batch_loss_zero, batch_loss_nz):             
         with torch.no_grad():
-            input_U = self.centroids[self.mapping] * self.U_mask  # k x i_max x rank
+            # Get input_U
+            input_U = self.centroids[self.mapping].data * self.U_mask
+            
+            # Define mat_G
+            perm_dims = [1, 0, self.tensor.order-1] + [m for m in range(2, self.tensor.order-1)]
+            mat_G = torch.reshape(torch.permute(self.G.data, perm_dims), (self.rank, -1))   # R x R^(d-1)    
 
-            # compute zero terms 
+            # Define VtV
             VtV = None
-            for m in range(self.tensor.order-2):
-                if m == 0: 
-                    VtV = torch.mm(self.V[m].t(), self.V[m]).unsqueeze(0)
-                else:
-                    VtV = batch_kron(VtV, torch.mm(self.V[m].t(), self.V[m]).unsqueeze(0))                   
-            VtV = VtV.squeeze()   # rank x rank
-            StS = torch.matmul(self.S.unsqueeze(-1), self.S.unsqueeze(1))  # k x rank x rank
-            
-            perm_G = tuple([0, self.tensor.order-1] + [m for m in range(1, self.tensor.order-1)])
-            vec_G = torch.permute(self.G, perm_G)
-            vec_G = vec_G.flatten()
-            sq_loss = 0       
-            
-            US = 0  # rank^2 x rank^2
+            if self.tensor.order > 3:
+                for m in range(1, self.tensor.order-2):
+                    if m == 1: 
+                        VtV = torch.mm(self.V[m].t(), self.V[m]).unsqueeze(0)
+                    else:
+                        VtV = batch_kron(VtV, torch.mm(self.V[m].t(), self.V[m]).unsqueeze(0))                   
+                VtV = VtV.squeeze()   # rank^(d-3) x rank^(d-3)
+            middle_mat = 0
             for i in tqdm(range(0, self.tensor.num_tensor, batch_loss_zero)):                
                 curr_batch_size = min(self.tensor.num_tensor - i, batch_loss_zero)
-                assert(curr_batch_size > 1)
-                curr_U = input_U[i:i+curr_batch_size, :, :]    # batch size x i_max x rank
-                curr_US = torch.bmm(torch.transpose(curr_U, 1, 2), curr_U)   # batch size x rank x rank
-                curr_US = batch_kron(curr_US, StS[i:i+curr_batch_size, :, :])    # batch size x rank^2 x rank^2
-                US = US + torch.sum(curr_US, dim=0)            
-            USV = batch_kron(US.unsqueeze(0), VtV.unsqueeze(0))   # rank^d x rank^d
-            sq_loss = vec_G.unsqueeze(0) @ USV.squeeze() @ vec_G.unsqueeze(-1) 
-            sq_loss = sq_loss.squeeze().item()
+                curr_U = input_U[i:+curr_batch_size, :, :] # batch size x i_max x R        
+                curr_S = self.S[i:i+curr_batch_size, :].data   # batch size x R
+                UtU = torch.bmm(torch.transpose(curr_U, 1, 2), curr_U)   # batch size x R x R
+                StS = torch.bmm(curr_S.unsqueeze(-1), curr_S.unsqueeze(1))   # batch size x R x R
+                middle_mat = torch.sum(batch_kron(UtU, StS), dim=0)   # R^2 x R^2
+            
+            if self.tensor.order > 3:
+                middle_mat = batch_kron(middle_mat.unsqueeze(0), VtV.unsqueeze(0))
+                middle_mat = middle_mat.squeeze() # middle_mat: R^(d-1) x R^(d-1)
+                
+            VG = self.V[0].data @ mat_G   # i_2 x R^(d-1)
+            middle_mat = VG @ middle_mat   # i_2 x R^(d-1) 
+            sq_loss = torch.sum(middle_mat * VG).item()          
             
             # Correct non-zero terms
             for i in tqdm(range(0, self.tensor.num_nnz, batch_loss_nz)):
