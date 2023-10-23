@@ -423,13 +423,13 @@ class parafac2:
                     VtV = batch_kron(VtV, curr_VtV)  
             VtV = VtV.squeeze()  # R^(d-2) x R^(d-2)
 
+            # first mat
             for i in tqdm(range(0, self.tensor.num_tensor, args.tucker_batch_u)):
                 curr_batch_size = min(args.tucker_batch_u, self.tensor.num_tensor - i)
                 curr_mapping = self.mapping[i:i+curr_batch_size, :]  # bs x i_max
                 curr_mapping_mask = self.mapping_mask[i:i+curr_batch_size, :]  # bs x i_max
                 curr_S = self.S[i:i+curr_batch_size, :]   # bs x R
-                
-                # first mat
+                                
                 if args.is_dense:     
                     curr_S = self.S[i:i+curr_batch_size, :]   # bs x R
                     XVSG = batch_kron(Vkron.repeat(curr_batch_size, 1, 1), curr_S.unsqueeze(1))  # bs x j_1*...*j_(d-2) x R                 ^(d-1)
@@ -466,18 +466,25 @@ class parafac2:
                     temp_mapping = self.mapping[last_idx, first_idx]   # bs'
                     first_mat = first_mat.index_add_(0, temp_mapping, XVSG)   
                 
-                # handle the second mat
-                GVSG = torch.bmm(torch.transpose(curr_S.unsqueeze(1), 1, 2), curr_S.unsqueeze(1))    # batch size x rank x rank 
-                GVSG = batch_kron(VtV.repeat(curr_batch_size, 1, 1), GVSG)   # batch size x rank^(d-1) x rank^(d-1)
-                GVSG = torch.bmm(mat_G.repeat(curr_batch_size, 1, 1), GVSG)  # batch size x rank x rank^(d-1)
-                GVSG = torch.bmm(GVSG, mat_G.t().repeat(curr_batch_size, 1, 1))  # batch size x rank x rank                                 
-                GVSG = GVSG.unsqueeze(1).expand(-1, self.tensor.max_first, -1, -1)  # batch size x i_max x rank x rank
-                GVSG = GVSG[curr_mapping_mask]   # small bs x rank x rank
-                curr_mapping = curr_mapping[curr_mapping_mask]  # Small bs                
-                second_mat = second_mat.index_add_(0, curr_mapping, GVSG)
+            # Second mat
+            for i in range(0, self.tensor.num_tensor, args.tucker_batch_lossnz):
+                curr_batch_size = min(self.tensor.num_tensor - i, args.tucker_batch_lossnz)
+                curr_S = self.S.data[i:i+curr_batch_size, :]   # bs x rank
+                StS = torch.bmm(curr_S.unsqueeze(-1), curr_S.unsqueeze(1))   # bs x rank x rank
+                StS = StS.unsqueeze(1).expand(-1, num_clusters, -1, -1)   # bs x num_cluster x rank x rank   
                 
-            self.centroids.data = torch.bmm(first_mat.unsqueeze(1), torch.linalg.pinv(second_mat)).squeeze()              
-            
+                curr_mapping = self.mapping[i:i+curr_batch_size, :]  # bs x num_cluster
+                curr_mapping_mask = self.mapping_mask[i:i+curr_batch_size, :]  # bs x num_cluster
+                curr_mapping = curr_mapping[curr_mapping_mask]
+                StS = StS[curr_mapping_mask]
+                
+                second_mat = second_mat.index_add_(0, curr_mapping, StS)
+                
+            second_mat = batch_kron(VtV.repeat(num_clusters, 1, 1), second_mat)   # i_max x R^(d-1) x R^(d-1)
+            second_mat = torch.bmm(mat_G.repeat(num_clusters, 1, 1), second_mat)  # i_max x R x R^(d-1)
+            second_mat = torch.bmm(second_mat, mat_G.t().repeat(num_clusters, 1, 1))  # i_max x R x R
+                 
+            self.centroids.data = torch.bmm(first_mat.unsqueeze(1), torch.linalg.pinv(second_mat)).squeeze()                          
             
     def als_V(self, args, mode):            
         with torch.no_grad():
@@ -742,10 +749,17 @@ class parafac2:
         print(f'loss after loaded:{prev_fit}')
                 
         for e in range(args.epoch_als):
-            self.als_G(args)       
-            '''
+            self.als_G(args)         
+            if args.is_dense:
+                sq_loss = self.L2_loss_tucker_dense(args.batch_size)
+            else:
+                sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
+            curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)                        
+            print(f'als epoch: {e+1}, after g:{curr_fit}')
+            
             self.als_U(args)
             
+            '''
             for m in range(1, self.tensor.order-1):
                 self.als_G(args)                            
                 self.als_V(args, m)
@@ -759,9 +773,9 @@ class parafac2:
             else:
                 sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
             curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)            
-            with open(args.output_path + ".txt", 'a') as f:
-                f.write(f'als epoch: {e+1}, after s:{curr_fit}\n')
-            print(f'als epoch: {e+1}, after s:{curr_fit}')
+            #with open(args.output_path + ".txt", 'a') as f:
+            #    f.write(f'als epoch: {e+1}, after s:{curr_fit}\n')
+            print(f'als epoch: {e+1}, after u:{curr_fit}')
             
             if curr_fit - prev_fit < 1e-4:                 
                 break
