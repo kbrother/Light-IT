@@ -55,28 +55,18 @@ if __name__ == '__main__':
     )
     
     parser.add_argument(
-        "-tbn", "--tucker_batch_lossnz",
-        action="store", default=2**9, type=int
+        "-tbnz", "--tucker_batch_lossnz",
+        action="store", default=2**10, type=int
     )
     
     parser.add_argument(
-        "-tbu", "--tucker_batch_u",
+        "-tbx", "--tucker_batch_alsx",
         action="store", default=2**7, type=int
     )
-        
+     
     parser.add_argument(
-        "-tbv", "--tucker_batch_v",
-        action="store", default=2**7, type=int
-    )
-    
-    parser.add_argument(
-        "-tbs", "--tucker_batch_s",
-        action="store", default=2**7, type=int
-    )
-    
-    parser.add_argument(
-        "-tbg", "--tucker_batch_g",
-        action="store", default=2**7, type=int
+        "-tbnx", "--tucker_batch_alsnx",
+        action="store", default=2**6, type=int
     )
     
     torch.manual_seed(3)
@@ -105,7 +95,7 @@ if __name__ == '__main__':
             for m in range(_tensor.order-2):
                 _parafac2.V[m].data.copy_(state_dict['V'][m].to(device))
             _parafac2.S.data.copy_(state_dict['S'])
-
+            print(state_dict['fitness'])            
         else:
             _parafac2 = parafac2(_tensor, device, True, args)
             _parafac2.quantization(args)        
