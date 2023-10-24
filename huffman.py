@@ -55,16 +55,16 @@ def huffman_encoding(indices):
 def encoding(_tensor, cluster_result):
     cluster_result = cluster_result.numpy().tolist()
     total_map = []
-    for i in range(_tensor.k):
-        curr_map = [cluster_result[i][j] for j in range(_tensor.i[i])]
+    for i in range(_tensor.num_tensor):
+        curr_map = [cluster_result[i][j] for j in range(_tensor.first_dim[i])]
         total_map.append(curr_map)
     
     total_map = list(itertools.chain.from_iterable(total_map))
     result_dict = huffman_encoding(total_map)
     
     num_bits = 0
-    for i in range(_tensor.k):
-        for j in range(_tensor.i[i]):
+    for i in range(_tensor.num_tensor):
+        for j in range(_tensor.first_dim[i]):
             num_bits += len(result_dict[cluster_result[i][j]])
                                     
     return num_bits
@@ -72,6 +72,7 @@ def encoding(_tensor, cluster_result):
     
 # python huffman.py -tp ../data/23-Irregular-Tensor/cms.npy -rp results/cms-lr0.01-rank5.pt -r 5 -de 0 -d False
 # python huffman.py -tp ../data/23-Irregular-Tensor/mimic3.npy -rp results/mimic3-lr0.01-rank5.pt -r 5 -de 4 -d False
+# python huffman.py -tp ../data/23-Irregular-Tensor/delicious.pickle -rp results/delicious_r5_lr0.01_cp.pt -r 5 -de 6 -d False
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-tp', "--tensor_path", type=str)    
@@ -120,14 +121,15 @@ if __name__ == '__main__':
         device = torch.device("cpu")
     else:
         device = torch.device(f'cuda:{args.device}')
-    _tensor = irregular_tensor(args.tensor_path, torch.device(device), args.is_dense)
+    _tensor = irregular_tensor(args.tensor_path, args.is_dense)
     result_dict = torch.load(args.result_path)
     print("load finish")
     
-    _parafac2 = parafac2(_tensor, device, args)        
+    _parafac2 = parafac2(_tensor, device, False, args)        
     _parafac2.centroids.data.copy_(result_dict['centroids'].to(device))
     _parafac2.U.data.copy_(result_dict['U'].to(device))
-    _parafac2.V.data.copy_(result_dict['V'].to(device))
+    for m in range(_tensor.order-2):
+        _parafac2.V[m].data.copy_(result_dict['V'][m].to(device))
     _parafac2.S.data.copy_(result_dict['S'].to(device))
         
     if 'mapping' in result_dict:
