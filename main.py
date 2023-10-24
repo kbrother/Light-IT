@@ -61,12 +61,12 @@ if __name__ == '__main__':
     
     parser.add_argument(
         "-tbx", "--tucker_batch_alsx",
-        action="store", default=2**7, type=int
+        action="store", default=2**2, type=int
     )
      
     parser.add_argument(
         "-tbnx", "--tucker_batch_alsnx",
-        action="store", default=2**6, type=int
+        action="store", default=2**3, type=int
     )
     
     torch.manual_seed(3)
