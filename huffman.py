@@ -73,6 +73,7 @@ def encoding(_tensor, cluster_result):
 # python huffman.py -tp ../data/23-Irregular-Tensor/cms.npy -rp results/cms-lr0.01-rank5.pt -r 5 -de 0 -d False
 # python huffman.py -tp ../data/23-Irregular-Tensor/mimic3.npy -rp results/mimic3-lr0.01-rank5.pt -r 5 -de 4 -d False
 # python huffman.py -tp ../data/23-Irregular-Tensor/delicious.pickle -rp results/delicious_r5_lr0.01_cp.pt -r 5 -de 6 -d False
+# python huffman.py -tp ../data/23-Irregular-Tensor/enron.pickle -rp results/enron_r5_lr0.01_cp.pt -r 5 -de 6 -d False
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-tp', "--tensor_path", type=str)    
