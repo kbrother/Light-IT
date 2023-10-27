@@ -58,12 +58,7 @@ if __name__ == '__main__':
         "-tbnz", "--tucker_batch_lossnz",
         action="store", default=2**10, type=int
     )
-    
-    parser.add_argument(
-        "-tbx", "--tucker_batch_alsx",
-        action="store", default=2**2, type=int
-    )
-     
+
     parser.add_argument(
         "-tbnx", "--tucker_batch_alsnx",
         action="store", default=2**3, type=int
