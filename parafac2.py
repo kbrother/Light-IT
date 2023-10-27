@@ -531,15 +531,15 @@ class parafac2:
          
             # first_mat
             first_mat = torch.zeros((self.tensor.middle_dim[mode-1], self.rank), dtype=torch.double, device=self.device) # i_m x R            
-            for i in tqdm(range(0, self.tensor.num_tensor, args.tucker_batch_alsx)):                    
-                # Build the first mat
-                curr_batch_size = min(args.tucker_batch_alsx, self.tensor.num_tensor - i)        
-                assert(curr_batch_size > 1)
-                curr_mapping = self.mapping[i:i+curr_batch_size, :]   # batch size x i_max
-                curr_U = self.centroids.data[curr_mapping] * self.U_mask[i:i+curr_batch_size, :, :]   # batch size x i_max x R
-                curr_S = self.S[i:i+curr_batch_size, :]  # bs x R
-                                
-                if args.is_dense:
+            if args.is_dense:
+                for i in tqdm(range(0, self.tensor.num_tensor, args.tucker_batch_lossnz)):                    
+                    # Build the first mat
+                    curr_batch_size = min(args.tucker_batch_lossnz, self.tensor.num_tensor - i)        
+                    assert(curr_batch_size > 1)
+                    curr_mapping = self.mapping[i:i+curr_batch_size, :]   # batch size x i_max
+                    curr_U = self.centroids.data[curr_mapping] * self.U_mask[i:i+curr_batch_size, :, :]   # batch size x i_max x R
+                    curr_S = self.S[i:i+curr_batch_size, :]  # bs x R
+
                     curr_tensor = self.tensor.src_tensor_torch[i:i+curr_batch_size].to(self.device)  # bs x i_1 x i_2 x ... x i_(m-1)                 
                     perm_dims = [0, mode+1, 1] + [m for m in range(2, self.tensor.order-1) if m != mode + 1]    
                     curr_tensor = torch.permute(curr_tensor, perm_dims)   # bs x i_mode x i_1 x i_2 x ... x i_(m-1)  
@@ -553,30 +553,34 @@ class parafac2:
                     temp_fm = torch.bmm(curr_tensor, USV)   # batch size x i_m x R^(d-1)
                     temp_fm = torch.bmm(temp_fm, mat_G.t().repeat(curr_batch_size, 1, 1))   # batch size x i_m x R
                     first_mat = first_mat + torch.sum(temp_fm, dim=0)
-                else:                                                                    
-                    curr_tidx = self.tensor.tidx2start[i]
-                    next_tidx = self.tensor.tidx2start[i + curr_batch_size]
-                    
-                    first_idx = self.tensor.indices[0][curr_tidx:next_tidx]   # bs'
+            else:
+                for i in tqdm(range(0, self.tensor.num_nnz, args.tucker_batch_lossnz)):
+                    curr_batch_size = min(args.tucker_batch_lossnz, self.tensor.num_nnz - i)                    
+                    first_idx = self.tensor.indices[0][i:i+curr_batch_size]   # bs'
                     first_idx = torch.tensor(first_idx, dtype=torch.long, device=self.device)  # bs'
-                    last_idx = self.tensor.indices[-1][curr_tidx:next_tidx]   # bs'
+                    last_idx = self.tensor.indices[-1][i:i+curr_batch_size]   # bs'
                     last_idx = torch.tensor(last_idx, dtype=torch.long, device=self.device)  # bs'
-                    XUSV = curr_U[last_idx - i, first_idx, :]  # bs' x R
-                    XUSV = face_split(XUSV, self.S[last_idx, :])   # bs' x R^(d-1)
+                    min_k = torch.min(last_idx)
+                    max_k = torch.max(last_idx) + 1
+                    curr_mapping = self.mapping[min_k:max_k, :]   # bs' x i_max
+                    curr_U = self.centroids.data[curr_mapping] * self.U_mask[min_k:max_k]   # bs' x i_max x R
                     
+                    XUSV = curr_U[last_idx - min_k, first_idx, :]  # bs' x R
+                    XUSV = face_split(XUSV, self.S[last_idx, :])   # bs' x R^2
+
                     for m in range(1, self.tensor.order - 1):
                         if m == mode: continue
                         else:
-                            curr_idx = self.tensor.indices[m][curr_tidx:next_tidx]        
+                            curr_idx = self.tensor.indices[m][i:i+curr_batch_size]        
                             curr_idx = torch.tensor(curr_idx, dtype=torch.long, device=self.device)  # bs'                            
                             XUSV = face_split(XUSV, self.V[m-1][curr_idx, :])                                                                 # XUSV: bs' x R^(d-1)
-                            
-                    curr_values = self.tensor.values[curr_tidx:next_tidx]   # bs'
+
+                    curr_values = self.tensor.values[i:i+curr_batch_size]   # bs'
                     curr_values = torch.tensor(curr_values, dtype=torch.double, device=self.device)  # bs'
                     XUSV = curr_values.unsqueeze(-1) * XUSV  # bs' x R^(d-1)
                     temp_first_mat = XUSV @ mat_G.t()   # bs' x R
-                    
-                    curr_idx = self.tensor.indices[mode][curr_tidx:next_tidx]  # bs'
+
+                    curr_idx = self.tensor.indices[mode][i:i+curr_batch_size]  # bs'
                     curr_idx = torch.tensor(curr_idx, dtype=torch.long, device=self.device)  # bs'
                     first_mat = first_mat.index_add_(0, curr_idx, temp_first_mat)  # j_m x R
                     
@@ -790,34 +794,34 @@ class parafac2:
         
         prev_fit = 0
         for e in range(args.epoch_als):   
-            self.als_G(args)                  
-            if args.is_dense:
-                sq_loss = self.L2_loss_tucker_dense(args.batch_size)
-            else:
-                sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
-            curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)                        
-            print(f'als epoch: {e+1}, after g:{curr_fit}')            
-            self.als_U(args)                     
-            if args.is_dense:
-                sq_loss = self.L2_loss_tucker_dense(args.batch_size)
-            else:
-                sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
-            curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)                        
-            print(f'als epoch: {e+1}, after u:{curr_fit}')          
+            self.als_G(args)                     
+            self.als_U(args)                                 
             clear_memory()
-
-            '''
+            
             for m in range(1, self.tensor.order-1):
                 self.als_G(args)                            
+                if args.is_dense:
+                    sq_loss = self.L2_loss_tucker_dense(args.tucker_batch_lossnz)
+                else:
+                    sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
+                curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)                        
+                print(f'als epoch: {e+1}, after g:{curr_fit}')          
                 self.als_V(args, m)                        
+                if args.is_dense:
+                    sq_loss = self.L2_loss_tucker_dense(args.tucker_batch_lossnz)
+                else:
+                    sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
+                curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)                        
+                print(f'als epoch: {e+1}, after v:{curr_fit}')    
                 clear_memory()
-                    
+            
+            '''
             self.als_G(args)                                                 
             self.als_S(args)
             clear_memory()
-                                               
+             
             if args.is_dense:
-                sq_loss = self.L2_loss_tucker_dense(args.batch_size)
+                sq_loss = self.L2_loss_tucker_dense(args.tucker_batch_lossnz)
             else:
                 sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
             curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)            

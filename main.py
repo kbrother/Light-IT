@@ -11,7 +11,7 @@ import numpy as np
 # python main.py test_loss -tp ../data/23-Irregular-Tensor/test.npy -de 1 -r 10 -d True
 # python main.py train -tp ../input/23-Irregular-Tensor/delicious_small.pickle -op results/delicious -r 5 -d False -de 4 -e 10 -lr 0.01 -ea 5
 # python main.py train -tp ../input/23-Irregular-Tensor/cms_small.pickle -op results/cms -r 5 -d False -de 4 -e 10 -lr 0.1 -ea 5
-# python main.py train -tp ../input/23-Irregular-Tensor/action.npy -op results/action -r 5 -d True -de 4 -e 10 -lr 0.1 -ea 5
+# python main.py train -tp ../input/23-Irregular-Tensor/action.npy -op results/action -r 5 -d True -de 4 -e 10 -lr 0.1 -ea 5 -tbnz 50
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('action', type=str, help='type of running')
