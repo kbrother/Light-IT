@@ -285,7 +285,8 @@ class parafac2:
         for m in range(self.tensor.order-2):
             self.V[m].data.copy_(final_V[m].to(self.device))
         self.S.data.copy_(final_S.to(self.device))
-                
+        self.mapping = self.clustering(args)        
+        
         torch.save({
             'fitness': max_fitness, 'centroids': self.centroids.data, 'mapping': self.mapping,
             'S': self.S.data, 'V': final_V,
@@ -296,7 +297,7 @@ class parafac2:
         Use cpd to initialize tucker decomposition
     '''
     def init_tucker(self, args):
-        self.mapping = self.clustering(args)  # k x i_max
+        #self.mapping = self.clustering(args)  # k x i_max
         self.mapping_mask = torch.zeros(self.tensor.num_tensor, self.tensor.max_first, dtype=torch.bool, device=self.device)   # k x i_max
         for _k in range(self.tensor.num_tensor):        
             self.mapping_mask[_k, :self.tensor.first_dim[_k]] = True

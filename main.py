@@ -99,11 +99,11 @@ if __name__ == '__main__':
             _parafac2 = parafac2(_tensor, device, False, args)                
             state_dict = torch.load(args.output_path + "_cp.pt", map_location=device)
             _parafac2.centroids.data.copy_(state_dict['centroids'])
-            _parafac2.U.data.copy_(state_dict['U'])
 
             for m in range(_tensor.order-2):
                 _parafac2.V[m].data.copy_(state_dict['V'][m].to(device))
             _parafac2.S.data.copy_(state_dict['S'])
+            _parafac2.mapping = state_dict['mapping'].to(device)
             print(f"saved fitness: {state_dict['fitness']}")                        
         else:
             _parafac2 = parafac2(_tensor, device, True, args)
