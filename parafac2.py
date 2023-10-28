@@ -287,8 +287,8 @@ class parafac2:
         self.S.data.copy_(final_S.to(self.device))
                 
         torch.save({
-            'fitness': max_fitness, 'centroids': self.centroids.data, 
-            'U': self.U.data, 'S': self.S.data, 'V': final_V,
+            'fitness': max_fitness, 'centroids': self.centroids.data, 'mapping': self.mapping
+            'S': self.S.data, 'V': final_V,
         }, args.output_path + "_cp.pt")
                    
             
@@ -477,7 +477,7 @@ class parafac2:
                     first_mat = first_mat.index_add_(0, temp_mapping, XVSG)   
                 
             # Second mat
-            for i in range(0, self.tensor.num_tensor, args.tucker_batch_alsnx):                
+            for i in tqdm(range(0, self.tensor.num_tensor, args.tucker_batch_alsnx)):                
                 curr_batch_size = min(self.tensor.num_tensor - i, args.tucker_batch_alsnx)
                 assert(curr_batch_size > 1)
                 curr_S = self.S.data[i:i+curr_batch_size, :]   # bs x rank
@@ -491,7 +491,7 @@ class parafac2:
                 
                 second_mat = second_mat.index_add_(0, curr_mapping, StS)   # i_max x rank x rank
                  
-            for i in range(num_clusters):
+            for i in tqdm(range(num_clusters)):
                 temp_sm = batch_kron(VtV.unsqueeze(0), second_mat[i].unsqueeze(0))   # R^(d-1) x R^(d-1)
                 temp_sm = temp_sm.squeeze()
                 temp_sm = mat_G @ temp_sm @ mat_G.t()  # R X R
@@ -588,7 +588,7 @@ class parafac2:
                     
             # second mat
             second_mat = 0
-            for i in range(0, self.tensor.num_tensor, args.tucker_batch_alsnx):  
+            for i in tqdm(range(0, self.tensor.num_tensor, args.tucker_batch_alsnx)):  
                 curr_batch_size = min(self.tensor.num_tensor - i, args.tucker_batch_alsnx)
                 assert(curr_batch_size > 1)
                 curr_mapping = self.mapping[i:i+curr_batch_size, :]   # batch size x i_max
@@ -692,7 +692,7 @@ class parafac2:
             del UV, GUV
             
             second_mat = torch.zeros((self.tensor.num_tensor, self.rank, self.rank), device=self.device, dtype=torch.double)
-            for i in range(self.tensor.num_tensor):                       
+            for i in tqdm(range(self.tensor.num_tensor)):                       
                 curr_mapping = self.mapping[i, :][:self.tensor.first_dim[i]]   # num_clusters
                 second_mat[i] = torch.sum(GUVG[curr_mapping], dim=0)
             
@@ -771,7 +771,7 @@ class parafac2:
                                     
             # Third mat
             US = 0
-            for i in range(0, self.tensor.num_tensor, args.tucker_batch_alsnx):
+            for i in tqdm(range(0, self.tensor.num_tensor, args.tucker_batch_alsnx)):
                 curr_batch_size = min(args.tucker_batch_alsnx, self.tensor.num_tensor - i)                
                 assert(curr_batch_size > 1)
                 curr_mapping = self.mapping[i:i+curr_batch_size, :]   # batch size x i_max
@@ -830,7 +830,6 @@ class parafac2:
             
         torch.save({
             'fitness': curr_fit, 'mapping': self.mapping,
-            'centroids': self.centroids.data, 'U': self.U.data,
-            'S': self.S.data, 'V': self.V, 'G': self.G.data
+            'centroids': self.centroids.data, 'S': self.S.data, 'V': self.V, 'G': self.G.data
         }, args.output_path + ".pt")        
         
