@@ -6,6 +6,7 @@ import gc
 import os
 import random
 import numpy as np
+import time
 
 # python main.py test_loss -tp ../data/23-Irregular-Tensor/test.pickle -de 1 -r 10 -d False
 # python main.py test_loss -tp ../data/23-Irregular-Tensor/test.npy -de 1 -r 10 -d True
@@ -22,7 +23,7 @@ if __name__ == '__main__':
         
     parser.add_argument(
         "-de", "--device",
-        action="store", type=int
+        action="store", type=int, default=0
     )    
     
     parser.add_argument(
@@ -64,11 +65,16 @@ if __name__ == '__main__':
         action="store", default=2**3, type=int
     )
     
-    torch.manual_seed(3)
-    random.seed(3)
-    np.random.seed(3)
+    parser.add_argument(
+        "-s", "--seed", 
+        action="store", type=int,
+    )
     
     args = parser.parse_args()    
+    torch.manual_seed(args.seed)
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    
     if args.is_dense == "True":
         args.is_dense = True
     elif args.is_dense == "False":
@@ -80,7 +86,14 @@ if __name__ == '__main__':
     _tensor = irregular_tensor(args.tensor_path, args.is_dense)
     print("load finish")
             
+    if args.action == "train_cp":
+        start_time = time.time()
+        _parafac2 = parafac2(_tensor, device, True, args)
+        _parafac2.quantization(args)     
+        with open(args.output_path + ".txt", 'a') as f:
+            f.write(f'cp time: {time.time() - start_time}\n')
     if args.action == "train":
+        start_time = time.time()
         if os.path.exists(args.output_path + "_cp.pt"):            
             _parafac2 = parafac2(_tensor, device, False, args)                
             state_dict = torch.load(args.output_path + "_cp.pt", map_location=device)
@@ -90,11 +103,17 @@ if __name__ == '__main__':
             for m in range(_tensor.order-2):
                 _parafac2.V[m].data.copy_(state_dict['V'][m].to(device))
             _parafac2.S.data.copy_(state_dict['S'])
-            print(state_dict['fitness'])            
+            print(f'saved fitness: {state_dict['fitness']')                        
         else:
             _parafac2 = parafac2(_tensor, device, True, args)
             _parafac2.quantization(args)        
-        _parafac2.als(args)
+            _parafac2.clear_memory()
+            with open(args.output_path + ".txt", 'a') as f:
+                f.write(f'cp time: {time.time() - start_time}\n')
+            start_time = time.time()
+        _parafac2.als(args)        
+        with open(args.output_path + ".txt", 'a') as f:
+            f.write(f'tucker time: {time.time() - start_time}\n')
     elif args.action == "test_loss":
         _parafac2 = parafac2(_tensor, device, True, args)
         with torch.no_grad():
