@@ -287,7 +287,7 @@ class parafac2:
         self.S.data.copy_(final_S.to(self.device))
                 
         torch.save({
-            'fitness': max_fitness, 'centroids': self.centroids.data, 'mapping': self.mapping
+            'fitness': max_fitness, 'centroids': self.centroids.data, 'mapping': self.mapping,
             'S': self.S.data, 'V': final_V,
         }, args.output_path + "_cp.pt")
                    
