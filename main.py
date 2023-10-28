@@ -7,6 +7,7 @@ import os
 import random
 import numpy as np
 import time
+from parafac2 import clear_memory
 
 # python main.py test_loss -tp ../data/23-Irregular-Tensor/test.pickle -de 1 -r 10 -d False
 # python main.py test_loss -tp ../data/23-Irregular-Tensor/test.npy -de 1 -r 10 -d True
@@ -103,11 +104,11 @@ if __name__ == '__main__':
             for m in range(_tensor.order-2):
                 _parafac2.V[m].data.copy_(state_dict['V'][m].to(device))
             _parafac2.S.data.copy_(state_dict['S'])
-            print(f'saved fitness: {state_dict['fitness']')                        
+            print(f"saved fitness: {state_dict['fitness']}")                        
         else:
             _parafac2 = parafac2(_tensor, device, True, args)
             _parafac2.quantization(args)        
-            _parafac2.clear_memory()
+            clear_memory()
             with open(args.output_path + ".txt", 'a') as f:
                 f.write(f'cp time: {time.time() - start_time}\n')
             start_time = time.time()
