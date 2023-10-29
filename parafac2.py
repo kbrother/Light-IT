@@ -117,7 +117,7 @@ class parafac2:
         self.device = device
         self.tensor = _tensor
         if args.is_dense:
-            scale_factor = 1
+            scale_factor = 0.1
         else:
             scale_factor = 0.01
         self.U_mask = torch.zeros((_tensor.num_tensor, _tensor.max_first, args.rank), device=device, dtype=torch.double)   # k x i_max x rank, 1 means the valid area
@@ -145,9 +145,9 @@ class parafac2:
         
         with torch.no_grad():
             if args.is_dense:
-                sq_loss = self.L2_loss_dense(False, args.batch_size, self.U * self.U_mask)
+                sq_loss = self.L2_loss_dense(args, False, "parafac2")
             else:
-                sq_loss = self.L2_loss(False, args.batch_size, self.U * self.U_mask)
+                sq_loss = self.L2_loss(args, False, "parafac2")
             print(f'fitness: {1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)}') 
             print(f'square loss: {sq_loss}')
             
@@ -155,20 +155,30 @@ class parafac2:
     '''
         input_U: num_tensor x i_max x rank
     '''
-    def L2_loss_dense(self, is_train, batch_size, input_U):
-        _loss = 0
-        Vprod = self.V[0]
-        for i in range(1, self.tensor.order-2):
-            Vprod = khatri_rao(Vprod, self.V[i]).unsqueeze(0)   # 1 x i_2 * ... * i_(m-1) x rank        
+    def L2_loss_dense(self, args, is_train, mode):
+        _loss = 0            
+        for i in range(0, self.tensor.num_tensor, args.batch_lossz):                        
+            Vprod = self.V[0]
+            for j in range(1, self.tensor.order-2):
+                Vprod = khatri_rao(Vprod, self.V[j]).unsqueeze(0)   # 1 x i_2 * ... * i_(m-1) x rank        
+
             
-        for i in range(0, self.tensor.num_tensor, batch_size):                        
-            curr_batch_size = min(batch_size, self.tensor.num_tensor - i) 
+            curr_batch_size = min(args.batch_lossz, self.tensor.num_tensor - i) 
             assert(curr_batch_size > 1)
             curr_S = self.S[i:i+curr_batch_size, :].unsqueeze(1)  # bs x 1 x rank
             VS = Vprod * curr_S   # bs x i_2 * ... * i_(m-1) x rank        
             VS = torch.transpose(VS, 1, 2)   # bs x rank x i_2 * ... * i_(m-1)        
             
-            curr_U = input_U[i:i+curr_batch_size, :, :] # batch size x i_max x rank
+            curr_U = self.U[i:i+curr_batch_size]
+            if mode != "parafac2":
+                curr_mapping = self.mapping[i:i+curr_batch_size]
+                curr_U_cluster = self.centroids[curr_mapping]
+                if mode=="train":                
+                    sg_part = (curr_U - curr_U_cluster).detach()
+                    curr_U = curr_U - sg_part
+                else:
+                    curr_U = curr_U_cluster
+             # curr_U: batch size x i_max x rank
             approx = torch.bmm(curr_U, VS)   # bs x i_max x i_2 * ... * i_(m-1)                    
             curr_tensor = self.set_curr_tensor(curr_batch_size, i)
             self.tensor.src_tensor_torch[i:i+curr_batch_size].to(self.device)  # bs x i_max x i_2 x ... x i_(m-1)  
@@ -183,30 +193,57 @@ class parafac2:
 
     
     '''
-        input_U: k x i_max x rank
+        mode: train or test or parafac2
     '''
-    def L2_loss(self, is_train, batch_size, input_U):                
-        # zero terms             
-        VtV = torch.ones((self.rank, self.rank), device=self.device, dtype=torch.double)  # r x r
-        for i in range(self.tensor.order-2):
-            VtV = VtV * (self.V[i].t() @ self.V[i])  # r x r
+    def L2_loss(self, args, is_train, mode):                    
+        _loss = 0
+        for i in range(0, self.tensor.num_tensor, args.batch_lossz):
+            # zero terms             
+            VtV = torch.ones((self.rank, self.rank), device=self.device, dtype=torch.double)  # r x r
+            for j in range(self.tensor.order-2):
+                VtV = VtV * (self.V[j].t() @ self.V[j])  # r x r
             
-        UtU = torch.bmm(torch.transpose(input_U, 1, 2), input_U) # k x rank x rank
-        StS = torch.bmm(self.S.unsqueeze(2), self.S.unsqueeze(1)) # k x rank x rank
-        first_mat = torch.sum(UtU * StS, dim=0)  # rank x rank
-        sq_sum = torch.sum(first_mat * VtV)
-        if is_train: 
-            sq_sum.backward()
-        _loss = sq_sum.item()
+            curr_batch_size = min(args.batch_lossz, self.tensor.num_tensor - i)
+            assert(curr_batch_size > 1)            
+            
+            curr_U = self.U[i:i+curr_batch_size] * self.U_mask[i:i+curr_batch_size]
+            if mode != "parafac2":
+                curr_mapping = self.mapping[i:i+curr_batch_size]
+                curr_U_cluster = self.centroids[curr_mapping] * self.U_mask[i:i+curr_batch_size]
+                if mode=="train":                
+                    sg_part = (curr_U - curr_U_cluster).detach()
+                    curr_U = curr_U - sg_part
+                else:
+                    curr_U = curr_U_cluster
+
+            UtU = torch.bmm(torch.transpose(curr_U, 1, 2), curr_U) # k x rank x rank
+            curr_S = self.S[i:i+curr_batch_size, :]
+            StS = torch.bmm(curr_S.unsqueeze(2), curr_S.unsqueeze(1)) # k x rank x rank
+            first_mat = torch.sum(UtU * StS, dim=0)  # rank x rank
+            sq_sum = torch.sum(first_mat * VtV)
+            if is_train: 
+                sq_sum.backward()
+            _loss += sq_sum.item()
         
         # Correct non-zero terms        
-        for i in range(0, self.tensor.num_nnz, batch_size):
-            curr_batch_size = min(batch_size, self.tensor.num_nnz - i)
+        for i in range(0, self.tensor.num_nnz, args.batch_lossnz):
+            curr_batch_size = min(args.batch_lossnz, self.tensor.num_nnz - i)
             assert(curr_batch_size > 1)
             first_idx = torch.tensor(self.tensor.indices[0][i: i+curr_batch_size], device=self.device, dtype=torch.long) # bs
             final_idx = torch.tensor(self.tensor.indices[-1][i: i+curr_batch_size], device=self.device, dtype=torch.long)  # bs
             
-            approx = input_U[final_idx, first_idx, :] * self.S[final_idx, :]  # bs x rank
+            mink = torch.min(final_idx)
+            maxk = torch.max(final_idx) + 1                        
+            curr_U = self.U[mink:maxk]
+            if mode != "parafac2":
+                curr_mapping = self.mapping[mink:maxk]
+                if mode == "train":                
+                    sg_part = (curr_U - self.centroids[curr_mapping]).detach()
+                    curr_U = curr_U - sg_part
+                else:
+                    curr_U = self.centroids[curr_mapping]
+
+            approx = curr_U[final_idx - mink, first_idx, :] * self.S[final_idx, :]  # bs x rank
             for m in range(1, self.tensor.order-1):
                 curr_idx = torch.tensor(self.tensor.indices[m][i: i+curr_batch_size], device=self.device, dtype=torch.long)
                 approx = approx * self.V[m-1][curr_idx, :]   # bs x rank
@@ -247,26 +284,33 @@ class parafac2:
         for _epoch in tqdm(range(args.epoch)):
             optimizer.zero_grad()
             # Clustering     
-            U_clustered = self.centroids[self.clustering(args)]    # k x i_max x rank
-            U_clustered = U_clustered * self.U_mask    
-            sg_part = (self.U - U_clustered).detach()
-            U_tricked = self.U - sg_part # refer to paper   # k x i_max x rank   
+            self.mapping = self.clustering(args)
+                       
             if args.is_dense:
-                self.L2_loss_dense(True, args.batch_size, U_tricked) 
+                self.L2_loss_dense(args, True, "train") 
             else:
-                self.L2_loss(True, args.batch_size, U_tricked) 
-            cluster_loss = torch.sum(torch.square(U_clustered - (self.U * self.U_mask).detach()))            
-            cluster_loss.backward()
-            optimizer.step()
+                self.L2_loss(args, True, "train")
+                
+            # cluster loss
+            for i in range(0, self.tensor.num_tensor, args.batch_lossz):
+                curr_batch_size = min(args.batch_lossz, self.tensor.num_tensor - i)
+                assert(curr_batch_size > 1)
+                curr_mapping = self.mapping[i:i+curr_batch_size]
+                curr_U = self.U[i:i+curr_batch_size] * self.U_mask[i:i+curr_batch_size]
+                curr_U_cluster = self.centroids[curr_mapping] * self.U_mask[i:i+curr_batch_size]
+                cluster_loss = torch.sum(torch.square(curr_U_cluster - curr_U.detach()))            
+                cluster_loss.backward()
+            del curr_mapping, curr_U, curr_U_cluster
+            clear_memory()
             
+            optimizer.step()            
             if (_epoch + 1) % 10 == 0:
                 with torch.no_grad():
-                    U_clustered = self.centroids[self.clustering(args)]    # k x i_max x rank
-                    U_clustered = U_clustered * self.U_mask
+                    self.mapping = self.clustering(args)
                     if args.is_dense:
-                        _loss = self.L2_loss_dense(False, args.batch_size, U_clustered) 
+                        _loss = self.L2_loss_dense(args, False, "test") 
                     else:
-                        _loss = self.L2_loss(False, args.batch_size, U_clustered)              
+                        _loss = self.L2_loss(args, False, "test")              
                     _fitness = 1 - math.sqrt(_loss)/math.sqrt(self.tensor.sq_sum)
                     print(f'epoch: {_epoch}, l2 loss: {_loss}, fitness: {_fitness}')
                     with open(args.output_path + ".txt", 'a') as f:
@@ -277,7 +321,8 @@ class parafac2:
                         final_U = self.U.data.clone().detach().cpu()
                         final_cents = self.centroids.data.clone().detach().cpu()
                         final_V = [_v.data.clone().detach().cpu() for _v in self.V]                        
-                        final_S = self.S.data.clone().detach().cpu()
+                        final_S = self.S.data.clone().detach().cpu()                        
+                        final_mapping = self.mapping.clone().detach().cpu()
                         
         self.centroids.data.copy_(final_cents.to(self.device))
         self.U.data.copy_(final_U.to(self.device))
@@ -285,7 +330,7 @@ class parafac2:
         for m in range(self.tensor.order-2):
             self.V[m].data.copy_(final_V[m].to(self.device))
         self.S.data.copy_(final_S.to(self.device))
-        self.mapping = self.clustering(args)        
+        self.mapping = final_mapping        
         
         torch.save({
             'fitness': max_fitness, 'centroids': self.centroids.data, 'mapping': self.mapping,

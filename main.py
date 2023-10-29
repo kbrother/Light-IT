@@ -9,8 +9,8 @@ import numpy as np
 import time
 from parafac2 import clear_memory
 
-# python main.py test_loss -tp ../data/23-Irregular-Tensor/test.pickle -de 1 -r 10 -d False
-# python main.py test_loss -tp ../data/23-Irregular-Tensor/test.npy -de 1 -r 10 -d True
+# python main.py test_loss -tp ../input/23-Irregular-Tensor/test.pickle -de 1 -r 3 -d False -s 0
+# python main.py test_loss -tp ../input/23-Irregular-Tensor/test.npy -de 1 -r 3 -d True -s 0
 # python main.py train -tp ../input/23-Irregular-Tensor/delicious_small.pickle -op results/delicious -r 5 -d False -de 4 -e 10 -lr 0.01 -ea 5
 # python main.py train -tp ../input/23-Irregular-Tensor/cms_small.pickle -op results/cms -r 5 -d False -de 4 -e 10 -lr 0.1 -ea 5
 # python main.py train -tp ../input/23-Irregular-Tensor/action.npy -op results/action -r 5 -d True -de 4 -e 10 -lr 0.1 -ea 5 -tbnz 50
@@ -28,8 +28,13 @@ if __name__ == '__main__':
     )    
     
     parser.add_argument(
-        "-b", "--batch_size",
-        action="store", default=2**22, type=int
+        "-bz", "--batch_lossz",
+        action="store", default=2**10, type=int
+    )
+    
+    parser.add_argument(
+        "-bnz", "--batch_lossnz",
+        action="store", default=2**20, type=int
     )
     
     parser.add_argument(
@@ -60,7 +65,7 @@ if __name__ == '__main__':
         "-tbnz", "--tucker_batch_lossnz",
         action="store", default=2**10, type=int
     )
-
+    
     parser.add_argument(
         "-tbnx", "--tucker_batch_alsnx",
         action="store", default=2**10, type=int
@@ -93,6 +98,7 @@ if __name__ == '__main__':
         _parafac2.quantization(args)     
         with open(args.output_path + ".txt", 'a') as f:
             f.write(f'cp time: {time.time() - start_time}\n')
+            
     if args.action == "train":
         start_time = time.time()
         if os.path.exists(args.output_path + "_cp.pt"):            
@@ -113,15 +119,18 @@ if __name__ == '__main__':
                 f.write(f'cp time: {time.time() - start_time}\n')
             start_time = time.time()
         _parafac2.als(args)        
+        
         with open(args.output_path + ".txt", 'a') as f:
             f.write(f'tucker time: {time.time() - start_time}\n')
+            
     elif args.action == "test_loss":
         _parafac2 = parafac2(_tensor, device, True, args)
         with torch.no_grad():
             if args.is_dense:
-                print(f'dense: {_parafac2.L2_loss_dense(False, args.batch_size, _parafac2.U)}')
+                print(f'dense: {_parafac2.L2_loss_dense(args, False, "parafac2")}')
             else:
-                print(f'sparse: {_parafac2.L2_loss(False, args.batch_size, _parafac2.U)}')            
+                print(f'sparse: {_parafac2.L2_loss(args, False, "parafac2")}')            
+    
     elif args.action == "test_tucker_loss":
         _parafac2 = parafac2(_tensor, device, True, args)
         _parafac2.init_tucker(args)        
