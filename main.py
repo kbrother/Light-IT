@@ -34,7 +34,7 @@ if __name__ == '__main__':
     
     parser.add_argument(
         "-bnz", "--batch_lossnz",
-        action="store", default=2**20, type=int
+        action="store", default=2**22, type=int
     )
     
     parser.add_argument(

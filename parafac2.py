@@ -157,7 +157,7 @@ class parafac2:
     '''
     def L2_loss_dense(self, args, is_train, mode):
         _loss = 0            
-        for i in range(0, self.tensor.num_tensor, args.batch_lossz):                        
+        for i in tqdm(range(0, self.tensor.num_tensor, args.batch_lossz)):                        
             Vprod = self.V[0]
             for j in range(1, self.tensor.order-2):
                 Vprod = khatri_rao(Vprod, self.V[j]).unsqueeze(0)   # 1 x i_2 * ... * i_(m-1) x rank        
@@ -197,7 +197,7 @@ class parafac2:
     '''
     def L2_loss(self, args, is_train, mode):                    
         _loss = 0
-        for i in range(0, self.tensor.num_tensor, args.batch_lossz):
+        for i in tqdm(range(0, self.tensor.num_tensor, args.batch_lossz)):
             # zero terms             
             VtV = torch.ones((self.rank, self.rank), device=self.device, dtype=torch.double)  # r x r
             for j in range(self.tensor.order-2):
@@ -226,7 +226,7 @@ class parafac2:
             _loss += sq_sum.item()
         
         # Correct non-zero terms        
-        for i in range(0, self.tensor.num_nnz, args.batch_lossnz):
+        for i in tqdm(range(0, self.tensor.num_nnz, args.batch_lossnz)):
             curr_batch_size = min(args.batch_lossnz, self.tensor.num_nnz - i)
             assert(curr_batch_size > 1)
             first_idx = torch.tensor(self.tensor.indices[0][i: i+curr_batch_size], device=self.device, dtype=torch.long) # bs
@@ -281,7 +281,7 @@ class parafac2:
     def quantization(self, args):
         optimizer = torch.optim.Adam([self.U, self.S, self.centroids] + self.V, lr=args.lr)
         max_fitness = -100
-        for _epoch in tqdm(range(args.epoch)):
+        for _epoch in range(args.epoch):
             optimizer.zero_grad()
             # Clustering     
             self.mapping = self.clustering(args)
