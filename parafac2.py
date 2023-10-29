@@ -330,7 +330,7 @@ class parafac2:
         for m in range(self.tensor.order-2):
             self.V[m].data.copy_(final_V[m].to(self.device))
         self.S.data.copy_(final_S.to(self.device))
-        self.mapping = final_mapping        
+        self.mapping = final_mapping.to(self.device)        
         
         torch.save({
             'fitness': max_fitness, 'centroids': self.centroids.data, 'mapping': self.mapping,
