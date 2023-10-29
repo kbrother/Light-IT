@@ -549,7 +549,7 @@ class parafac2:
         with torch.no_grad():
             # Define mat_G
             perm_dims = [mode, 0, self.tensor.order-1] + [m for m in range(1, self.tensor.order-1) if m != mode]
-            mat_G = torch.reshape(torch.permute(self.G.data, perm_dims), (self.rank, -1))   # R x R^(d-1)                
+            mat_G = torch.reshape(torch.permute(self.G, perm_dims), (self.rank, -1))   # R x R^(d-1)                
             # define VtV
             VtV, Vkron = None, None
             if self.tensor.order > 3:
@@ -658,7 +658,7 @@ class parafac2:
         with torch.no_grad():
             # Define mat_G
             perm_dims = [self.tensor.order-1] + [m for m in range(self.tensor.order-1)]
-            mat_G = torch.reshape(torch.permute(self.G.data, perm_dims), (self.rank, -1))   # R x R^(d-1)    
+            mat_G = torch.reshape(torch.permute(self.G, perm_dims), (self.rank, -1))   # R x R^(d-1)    
             
             # Define VtV                        
             VtV = None
@@ -829,12 +829,12 @@ class parafac2:
                 US = US + torch.sum(temp_US, dim=0)            
             third_mat = torch.linalg.pinv(US)
                                                  
-            self.G.data = first_mat @ second_mat @ third_mat
+            self.G = first_mat @ second_mat @ third_mat
             orig_shape = tuple(self.rank for _ in range(self.tensor.order))
-            self.G.data = torch.reshape(self.G.data, orig_shape)
+            self.G = torch.reshape(self.G, orig_shape)
             
             temp_perm = tuple([self.tensor.order-2] + [m for m in range(self.tensor.order-2)] + [self.tensor.order-1])
-            self.G.data = torch.permute(self.G.data, temp_perm)
+            self.G = torch.permute(self.G, temp_perm)
             
     def als(self, args):                
         self.init_tucker(args) 
@@ -876,6 +876,6 @@ class parafac2:
             
         torch.save({
             'fitness': curr_fit, 'mapping': self.mapping,
-            'centroids': self.centroids.data, 'S': self.S.data, 'V': self.V, 'G': self.G.data
+            'centroids': self.centroids.data, 'S': self.S.data, 'V': self.V, 'G': self.G
         }, args.output_path + ".pt")        
         
