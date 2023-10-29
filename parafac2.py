@@ -874,8 +874,8 @@ class parafac2:
                 break
             prev_fit = curr_fit                                      
             
+        final_V = [_v.data.clone().detach().cpu() for _v in self.V]      
         torch.save({
             'fitness': curr_fit, 'mapping': self.mapping,
-            'centroids': self.centroids.data, 'S': self.S.data, 'V': self.V, 'G': self.G
-        }, args.output_path + ".pt")        
+            'centroids': self.centroids.data, 'S': self.S.data, 'V': final_V, 'G': self.G}, args.output_path + ".pt")        
         
