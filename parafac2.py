@@ -118,9 +118,9 @@ class parafac2:
         self.device = device
         self.tensor = _tensor
         if args.is_dense:
-            scale_factor = 1 #0.1
+            scale_factor = 0.1
         else:
-            scale_factor = 1 #0.01
+            scale_factor = 0.01
         
         _sum = 0
         self.U_sidx = [0]  # num_tensor + 1, idx of tensor slice -> row idx of U
@@ -192,8 +192,8 @@ class parafac2:
             
             curr_U = self.U[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]]    # bs' x rank
             if mode != "parafac2":
-                curr_mapping = self.mapping[i:i+curr_batch_size]
-                curr_U_cluster = self.centroids[curr_mapping]
+                curr_mapping = self.mapping[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]]   # bs'
+                curr_U_cluster = self.centroids[curr_mapping]  # bs' x rank
                 if mode=="train":                
                     sg_part = (curr_U - curr_U_cluster).detach()
                     curr_U = curr_U - sg_part
@@ -227,8 +227,8 @@ class parafac2:
                         
             curr_U = self.U[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]]   # bs' x R
             if mode != "parafac2":
-                curr_mapping = self.mapping[i:i+curr_batch_size]
-                curr_U_cluster = self.centroids[curr_mapping] * self.U_mask[i:i+curr_batch_size]
+                curr_mapping = self.mapping[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]]  # bs'
+                curr_U_cluster = self.centroids[curr_mapping]  # bs' x rank
                 if mode=="train":                
                     sg_part = (curr_U - curr_U_cluster).detach()
                     curr_U = curr_U - sg_part
@@ -249,8 +249,7 @@ class parafac2:
             if is_train: 
                 sq_sum.backward()
             _loss += sq_sum.item()
-        
-        print(self.tensor.num_nnz)
+            
         # Correct non-zero terms                
         for i in tqdm(range(0, self.tensor.num_nnz, args.batch_lossnz)):
             curr_batch_size = min(args.batch_lossnz, self.tensor.num_nnz - i)
@@ -261,7 +260,7 @@ class parafac2:
             first_idx = first_idx + self.U_sidx[final_idx]   # batch size
             curr_U = self.U[first_idx, :]   # bs' x rank
             if mode != "parafac2":
-                curr_mapping = self.mapping[mink:maxk]
+                curr_mapping = self.mapping[first_idx]
                 if mode == "train":                
                     sg_part = (curr_U - self.centroids[curr_mapping]).detach()
                     curr_U = curr_U - sg_part
@@ -285,22 +284,22 @@ class parafac2:
 
     
     '''
-        cluster_label: k x i_max
+        cluster_label: num_rows
     '''
     def clustering(self, args):
         # Clustering
-        cluster_label = torch.zeros(self.tensor.num_tensor, self.tensor.max_first, dtype=torch.long, device=self.device)
+        cluster_label = torch.zeros(self.num_first_dim, dtype=torch.long, device=self.device)
         with torch.no_grad():
             for i in range(0, self.tensor.num_tensor, args.cluster_batch):                
                 curr_batch_size = min(self.tensor.num_tensor - i, args.cluster_batch)
                 assert(curr_batch_size > 1)
                 #dist = torch.zeros((self.tensor.max_first, curr_batch_size, self.tensor.max_first), device=self.device)   # i_max x batch size x i_max
-                curr_U = self.U[i:i+curr_batch_size, :, :]    # batch size x i_max x rank                
-                curr_dist = curr_U.unsqueeze(0) - self.centroids.unsqueeze(1).unsqueeze(1) # i_max x batch size x i_max x rank
-                curr_dist = torch.sum(torch.square(curr_dist), dim=-1) # i_max x batch size x i_max
+                curr_U = self.U[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]]  # bs' x rank                
+                curr_dist = curr_U.unsqueeze(0) - self.centroids.unsqueeze(1) # num_cents x bs' x rank
+                curr_dist = torch.sum(torch.square(curr_dist), dim=-1) # num_cents x bs'
                 #dist[j,:,:] = curr_dist
                     
-                cluster_label[i:i+curr_batch_size, :] = torch.argmin(curr_dist, dim=0)  # batch size x i_max
+                cluster_label[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]] = torch.argmin(curr_dist, dim=0)  # bs'
         return cluster_label
         
         
@@ -310,7 +309,7 @@ class parafac2:
         for _epoch in range(args.epoch):
             optimizer.zero_grad()
             # Clustering     
-            self.mapping = self.clustering(args)
+            self.mapping = self.clustering(args)  # num_rows, row idx of U -> idx of cluster
             
             if args.is_dense:
                 self.L2_loss_dense(args, True, "train") 
@@ -321,13 +320,13 @@ class parafac2:
             for i in range(0, self.tensor.num_tensor, args.batch_lossz):
                 curr_batch_size = min(args.batch_lossz, self.tensor.num_tensor - i)
                 assert(curr_batch_size > 1)
-                curr_mapping = self.mapping[i:i+curr_batch_size]
-                curr_U = self.U[i:i+curr_batch_size] * self.U_mask[i:i+curr_batch_size]
-                curr_U_cluster = self.centroids[curr_mapping] * self.U_mask[i:i+curr_batch_size]
+                curr_mapping = self.mapping[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]]   # bs'
+                curr_U = self.U[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]] 
+                curr_U_cluster = self.centroids[curr_mapping]
                 cluster_loss = torch.sum(torch.square(curr_U_cluster - curr_U.detach()))            
                 cluster_loss.backward()
-            del curr_mapping, curr_U, curr_U_cluster
-            clear_memory()
+            #del curr_mapping, curr_U, curr_U_cluster
+            #clear_memory()
             
             optimizer.step()            
             if (_epoch + 1) % 10 == 0:
