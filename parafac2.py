@@ -53,12 +53,10 @@ class parafac2:
                 
             for i in tqdm(range(self.tensor.num_tensor)):                                
                 # build tensor
-                if is_dense:  
-                    curr_first_dim = max(self.rank, self.tensor.first_dim[i]) 
-                    curr_dims = [curr_first_dim] + list(self.tensor.middle_dim)
-                    curr_tensor = torch.zeros(curr_dims, device=self.device, dtype=torch.double)
-                    curr_tensor[:self.tensor.first_dim[i]] = torch.from_numpy(self.tensor.src_tensor[i]).to(self.device)
-                    curr_tensor = torch.reshape(curr_tensor, (curr_first_dim, -1))  # i_max x ...       
+                if is_dense:                      
+                    curr_dims = [self.tensor.first_dim[i]] + list(self.tensor.middle_dim)
+                    curr_tensor = torch.from_numpy(self.tensor.src_tensor[i]).to(self.device)
+                    curr_tensor = torch.reshape(curr_tensor, (self.tensor.first_dim[i], -1))  # i_max x ...       
                 
                     VS = Vprod * self.S[i].unsqueeze(0) # row2 * rows3 *.... x rank
                     XVS = curr_tensor @ VS  # i_max x R                     
@@ -74,7 +72,7 @@ class parafac2:
                     VS = _V * self.S[curr_idx, :]   # curr nnz x rank
                     curr_X = torch.tensor(self.tensor.values[curr_tidx:next_tidx], device=self.device, dtype=torch.double)
                     XVS_raw = curr_X.unsqueeze(1) * VS  # curr nnz x rank                
-                    XVS = torch.zeros((max(self.rank, self.tensor.first_dim[i]), self.rank), device=self.device, dtype=torch.double)  # i_curr x rank
+                    XVS = torch.zeros((self.tensor.first_dim[i], self.rank), device=self.device, dtype=torch.double)  # i_curr x rank
                     
                     curr_idx = torch.tensor(self.tensor.indices[0][curr_tidx:next_tidx], dtype=torch.long, device=self.device)    # nnz
                     XVS = XVS.index_add_(0, curr_idx, XVS_raw)  # i_curr x rank                    
@@ -82,7 +80,7 @@ class parafac2:
                 # compute SVD                               
                 XVSH = XVS @ _H.t()   # i_curr x R                                 
                 Z, Sigma, Ph = torch.linalg.svd(XVSH, full_matrices=False)  # Z: i_max x R, Ph:  R x R
-                self.U[i,:max(self.tensor.first_dim[i], self.rank),:] = torch.mm(Z, Ph) # i_max x rank
+                self.U[self.U_sidx[i]:self.U_sidx[i+1],:] = torch.mm(Z, Ph) # i_max x rank
 
             # Normalize entry 
             _lambda = torch.sqrt(torch.sum(torch.square(_H), dim=0))  # R
@@ -104,12 +102,15 @@ class parafac2:
             self.S = self.S * _lambda.unsqueeze(0)
             
             # Normalize U
-            self.U = torch.bmm(self.U, _H.repeat(self.tensor.num_tensor, 1, 1))
+            self.U = self.U @ _H   # i_sum x rank
             
-        UTU = torch.bmm(torch.transpose(self.U, 1, 2), self.U)   # k x rank x rank                
-        HTH = _H.t() @ _H
+        UtU_input = torch.bmm(self.U.unsqueeze(-1), self.U.unsqueeze(1))   # i_sum x rank x rank                
+        UtU = torch.zeros((self.tensor.num_tensor, self.rank, self.rank), device=self.device, dtype=torch.double)
+        UtU = UtU.index_add_(0, self.U_mapping, UtU_input)   # k x rank x rank
+        
+        HtH = _H.t() @ _H
         #iden = torch.diag(torch.ones(self.rank)).to(self.device)
-        print(torch.mean(torch.abs(UTU - HTH.unsqueeze(0))))        
+        print(torch.mean(torch.abs(UtU - HtH.unsqueeze(0))))        
             
 
     def __init__(self, _tensor, device, require_init, args):      
@@ -120,13 +121,20 @@ class parafac2:
             scale_factor = 0.1
         else:
             scale_factor = 0.01
-        self.U_mask = torch.zeros((_tensor.num_tensor, _tensor.max_first, args.rank), device=device, dtype=torch.double)   # k x i_max x rank, 1 means the valid area
-        for _k in range(_tensor.num_tensor):
-            self.U_mask[_k, :_tensor.first_dim[_k], :] = 1
-
+        
+        _sum = 0
+        self.U_sidx = [0]  # num_tensor + 1
+        self.U_mapping = []  # i_sum
+        for i in range(_tensor.num_tensor):
+            _sum += _tensor.first_dim[i]
+            self.U_sidx.append(_sum)
+            for j in range(_tensor.first_dim[i]):
+                self.U_mapping.append(i)
+        
+        self.U_mapping = torch.tensor(self.U_mapping, device=self.device, dtype=torch.int)
+        self.num_first_dim = self.U_mapping.shape[0]
         self.rank = args.rank
-        self.U = scale_factor * torch.rand((_tensor.num_tensor, _tensor.max_first, self.rank), device=device, dtype=torch.double)  # k x i_max x rank        
-        self.U = self.U * self.U_mask          
+        self.U = scale_factor * torch.rand((self.num_first_dim, self.rank), device=device, dtype=torch.double)  # i_sum x rank              
         self.V = []
         for m in range(self.tensor.order-2):
             curr_dim = _tensor.middle_dim[m]
@@ -285,7 +293,7 @@ class parafac2:
             optimizer.zero_grad()
             # Clustering     
             self.mapping = self.clustering(args)
-                       
+            
             if args.is_dense:
                 self.L2_loss_dense(args, True, "train") 
             else:
