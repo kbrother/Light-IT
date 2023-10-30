@@ -9,8 +9,12 @@ import numpy as np
 import time
 from parafac2 import clear_memory
 
+# python main.py test_init -tp ../input/23-Irregular-Tensor/action.npy -de 1 -r 2 -d True -s 0
+# python main.py test_init -tp ../input/23-Irregular-Tensor/cms.pickle -de 1 -r 2 -d False -s 0
+
 # python main.py test_loss -tp ../input/23-Irregular-Tensor/test.pickle -de 1 -r 3 -d False -s 0
 # python main.py test_loss -tp ../input/23-Irregular-Tensor/test.npy -de 1 -r 3 -d True -s 0
+
 # python main.py train -tp ../input/23-Irregular-Tensor/delicious_small.pickle -op results/delicious -r 5 -d False -de 4 -e 10 -lr 0.01 -ea 5
 # python main.py train -tp ../input/23-Irregular-Tensor/cms_small.pickle -op results/cms -r 5 -d False -de 4 -e 10 -lr 0.1 -ea 5
 # python main.py train -tp ../input/23-Irregular-Tensor/action.npy -op results/action -r 5 -d True -de 4 -e 10 -lr 0.1 -ea 5 -tbnz 50
@@ -143,4 +147,4 @@ if __name__ == '__main__':
             print(f'sparse: {sq_loss}')
             
     elif args.action == "test_init":
-        _parafac2 = parafac2(_tensor, device, False, args)
+        _parafac2 = parafac2(_tensor, device, True, args)

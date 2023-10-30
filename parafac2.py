@@ -118,13 +118,13 @@ class parafac2:
         self.device = device
         self.tensor = _tensor
         if args.is_dense:
-            scale_factor = 0.1
+            scale_factor = 1 #0.1
         else:
-            scale_factor = 0.01
+            scale_factor = 1 #0.01
         
         _sum = 0
-        self.U_sidx = [0]  # num_tensor + 1
-        self.U_mapping = []  # i_sum
+        self.U_sidx = [0]  # num_tensor + 1, idx of tensor slice -> row idx of U
+        self.U_mapping = []  # i_sum, row idx of U -> idx of tensor slice        
         for i in range(_tensor.num_tensor):
             _sum += _tensor.first_dim[i]
             self.U_sidx.append(_sum)
@@ -152,6 +152,7 @@ class parafac2:
         for m in range(_tensor.order-2):
             self.V[m] = torch.nn.Parameter(self.V[m])
         
+        '''
         with torch.no_grad():
             if args.is_dense:
                 sq_loss = self.L2_loss_dense(args, False, "parafac2")
@@ -159,8 +160,19 @@ class parafac2:
                 sq_loss = self.L2_loss(args, False, "parafac2")
             print(f'fitness: {1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)}') 
             print(f'square loss: {sq_loss}')
-            
-            
+       '''     
+    
+    '''
+        Return a tensor of size 'batch size' x j_1*j_2*...*j_(d-2)        
+    '''
+    def set_curr_tensor(self, batch_size, start_k):
+        start_idx = self.U_sidx[start_k].item()
+        end_idx = self.U_sidx[start_k + batch_size].item()
+        curr_tensor = self.tensor.src_tensor_torch[start_idx:end_idx].to(self.device)  # bs' x i_2 x ... x i_(m-1)  
+        curr_tensor = torch.reshape(curr_tensor, (end_idx - start_idx, -1))   # bs' x i_2 * ... * i_(m-1) 
+        return curr_tensor
+        
+                                        
     '''
         input_U: num_tensor x i_max x rank
     '''
@@ -169,16 +181,16 @@ class parafac2:
         for i in tqdm(range(0, self.tensor.num_tensor, args.batch_lossz)):                        
             Vprod = self.V[0]
             for j in range(1, self.tensor.order-2):
-                Vprod = khatri_rao(Vprod, self.V[j]).unsqueeze(0)   # 1 x i_2 * ... * i_(m-1) x rank        
-
-            
+                Vprod = khatri_rao(Vprod, self.V[j])   # i_2 * ... * i_(m-1) x rank        
+       
             curr_batch_size = min(args.batch_lossz, self.tensor.num_tensor - i) 
             assert(curr_batch_size > 1)
-            curr_S = self.S[i:i+curr_batch_size, :].unsqueeze(1)  # bs x 1 x rank
-            VS = Vprod * curr_S   # bs x i_2 * ... * i_(m-1) x rank        
-            VS = torch.transpose(VS, 1, 2)   # bs x rank x i_2 * ... * i_(m-1)        
+            s_idx = self.U_mapping[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]]
+            curr_S = self.S[s_idx, :].unsqueeze(1)  # bs' x 1 x rank
+            VS = Vprod.unsqueeze(0) * curr_S   # bs' x i_2 * ... * i_(m-1) x rank        
+            VS = torch.transpose(VS, 1, 2)   # bs' x rank x i_2 * ... * i_(m-1)        
             
-            curr_U = self.U[i:i+curr_batch_size]
+            curr_U = self.U[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]]    # bs' x rank
             if mode != "parafac2":
                 curr_mapping = self.mapping[i:i+curr_batch_size]
                 curr_U_cluster = self.centroids[curr_mapping]
@@ -188,11 +200,9 @@ class parafac2:
                 else:
                     curr_U = curr_U_cluster
              # curr_U: batch size x i_max x rank
-            approx = torch.bmm(curr_U, VS)   # bs x i_max x i_2 * ... * i_(m-1)                    
-            curr_tensor = self.set_curr_tensor(curr_batch_size, i)
-            self.tensor.src_tensor_torch[i:i+curr_batch_size].to(self.device)  # bs x i_max x i_2 x ... x i_(m-1)  
-            curr_tensor = torch.reshape(curr_tensor, (curr_batch_size, self.tensor.max_first, -1))   # bs x i_max x i_2 * ... * i_(m-1)  
-            
+            approx = torch.bmm(curr_U.unsqueeze(1), VS).squeeze()   # bs' x i_2 * ... * i_(m-1)                    
+            curr_tensor = self.set_curr_tensor(curr_batch_size, i)  # bs' x i_2 * ... * i_(m-1)                                
+            #curr_loss = torch.sum(torch.square(approx))
             curr_loss = torch.sum(torch.square(approx - curr_tensor))
             if is_train:
                 curr_loss.backward()
@@ -240,14 +250,15 @@ class parafac2:
                 sq_sum.backward()
             _loss += sq_sum.item()
         
-        # Correct non-zero terms        
+        print(self.tensor.num_nnz)
+        # Correct non-zero terms                
         for i in tqdm(range(0, self.tensor.num_nnz, args.batch_lossnz)):
             curr_batch_size = min(args.batch_lossnz, self.tensor.num_nnz - i)
             assert(curr_batch_size > 1)
             first_idx = torch.tensor(self.tensor.indices[0][i: i+curr_batch_size], device=self.device, dtype=torch.long) # bs
             final_idx = torch.tensor(self.tensor.indices[-1][i: i+curr_batch_size], device=self.device, dtype=torch.long)  # bs
             
-            first_idx = first_idx + self.U_sidx[self.U_mapping[final_idx]]   # batch size
+            first_idx = first_idx + self.U_sidx[final_idx]   # batch size
             curr_U = self.U[first_idx, :]   # bs' x rank
             if mode != "parafac2":
                 curr_mapping = self.mapping[mink:maxk]
@@ -264,7 +275,8 @@ class parafac2:
             
             curr_value = torch.tensor(self.tensor.values[i: i+curr_batch_size], dtype=torch.double, device=self.device)
             approx = torch.sum(approx, dim=1)
-            sq_err = torch.sum(torch.square(curr_value - approx) - torch.square(approx))
+            #sq_err = -torch.sum(torch.square(approx))            
+            sq_err = torch.sum(torch.square(curr_value - approx) - torch.square(approx))            
             
             if is_train: sq_err.backward()
             _loss += sq_err.item()
@@ -424,15 +436,6 @@ class parafac2:
         return sq_loss
     
     
-    '''
-        Return a tensor of size 'batch size x i_max x j_1*j_2*...*j_(d-2)        
-    '''
-    def set_curr_tensor(self, batch_size, start_k):
-        curr_tensor = self.tensor.src_tensor_torch[start_k:start_k+batch_size].to(self.device)  # bs x i_max x i_2 x ... x i_(m-1)  
-        curr_tensor = torch.reshape(curr_tensor, (batch_size, self.tensor.max_first, -1))   # bs x i_max x i_2 * ... * i_(m-1) 
-        return curr_tensor
-        
-                
     def L2_loss_tucker_dense(self, batch_size):
         _loss = 0
         print(self.tensor.order)

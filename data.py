@@ -15,14 +15,17 @@ class irregular_tensor:
             self.middle_dim = self.src_tensor[0].shape[1:] 
             self.first_dim = np.array([self.src_tensor[_i].shape[0] for _i in range(self.num_tensor)])
             self.max_first = np.max(self.first_dim)
+            self.first_dim_sum = np.sum(self.first_dim)
 
             for i in range(self.num_tensor):
                 self.sq_sum += np.sum(np.square(self.src_tensor[i]))
 
-            temp_dims = [self.num_tensor, self.max_first] + list(self.middle_dim)
+            temp_dims = [self.first_dim_sum] + list(self.middle_dim)
             self.src_tensor_torch = torch.zeros(temp_dims, dtype=torch.double)
+            temp_sum = 0
             for i in range(self.num_tensor):
-                self.src_tensor_torch[i,:self.first_dim[i],:] = torch.tensor(self.src_tensor[i], dtype=torch.double)
+                self.src_tensor_torch[temp_sum:(temp_sum + self.first_dim[i])] = torch.tensor(self.src_tensor[i], dtype=torch.double)
+                temp_sum += self.first_dim[i]
                 
         # upload data to gpu        
         if not is_dense:
