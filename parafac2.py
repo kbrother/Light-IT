@@ -80,7 +80,7 @@ class parafac2:
                 # compute SVD                               
                 XVSH = XVS @ _H.t()   # i_curr x R                                 
                 Z, Sigma, Ph = torch.linalg.svd(XVSH, full_matrices=False)  # Z: i_max x R, Ph:  R x R
-                self.U[self.U_sidx[i]:self.U_sidx[i+1],:] = torch.mm(Z, Ph) # i_max x rank
+                self.U[self.U_sidx[i].item():self.U_sidx[i+1].item(),:] = torch.mm(Z, Ph) # i_max x rank
 
             # Normalize entry 
             _lambda = torch.sqrt(torch.sum(torch.square(_H), dim=0))  # R
@@ -131,7 +131,8 @@ class parafac2:
             for j in range(_tensor.first_dim[i]):
                 self.U_mapping.append(i)
         
-        self.U_mapping = torch.tensor(self.U_mapping, device=self.device, dtype=torch.int)
+        self.U_sidx = torch.tensor(self.U_sidx, device=self.device, dtype=torch.long)
+        self.U_mapping = torch.tensor(self.U_mapping, device=self.device, dtype=torch.long)
         self.num_first_dim = self.U_mapping.shape[0]
         self.rank = args.rank
         self.U = scale_factor * torch.rand((self.num_first_dim, self.rank), device=device, dtype=torch.double)  # i_sum x rank              
@@ -213,8 +214,8 @@ class parafac2:
             
             curr_batch_size = min(args.batch_lossz, self.tensor.num_tensor - i)
             assert(curr_batch_size > 1)            
-            
-            curr_U = self.U[i:i+curr_batch_size] * self.U_mask[i:i+curr_batch_size]
+                        
+            curr_U = self.U[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]]   # bs' x R
             if mode != "parafac2":
                 curr_mapping = self.mapping[i:i+curr_batch_size]
                 curr_U_cluster = self.centroids[curr_mapping] * self.U_mask[i:i+curr_batch_size]
@@ -223,8 +224,14 @@ class parafac2:
                     curr_U = curr_U - sg_part
                 else:
                     curr_U = curr_U_cluster
-
-            UtU = torch.bmm(torch.transpose(curr_U, 1, 2), curr_U) # k x rank x rank
+            
+            UtU_input = torch.bmm(curr_U.unsqueeze(-1), curr_U.unsqueeze(1))   # bs' x rank x rank                
+            UtU = torch.zeros((curr_batch_size, self.rank, self.rank), device=self.device, dtype=torch.double)
+            temp_idx = self.U_mapping[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]] - i
+            #print(temp_idx.shape)
+            #print(UtU_input.shape)
+            UtU = UtU.index_add_(0, temp_idx, UtU_input)   # k x rank x rank                
+            
             curr_S = self.S[i:i+curr_batch_size, :]
             StS = torch.bmm(curr_S.unsqueeze(2), curr_S.unsqueeze(1)) # k x rank x rank
             first_mat = torch.sum(UtU * StS, dim=0)  # rank x rank
@@ -240,9 +247,8 @@ class parafac2:
             first_idx = torch.tensor(self.tensor.indices[0][i: i+curr_batch_size], device=self.device, dtype=torch.long) # bs
             final_idx = torch.tensor(self.tensor.indices[-1][i: i+curr_batch_size], device=self.device, dtype=torch.long)  # bs
             
-            mink = torch.min(final_idx)
-            maxk = torch.max(final_idx) + 1                        
-            curr_U = self.U[mink:maxk]
+            first_idx = first_idx + self.U_sidx[self.U_mapping[final_idx]]   # batch size
+            curr_U = self.U[first_idx, :]   # bs' x rank
             if mode != "parafac2":
                 curr_mapping = self.mapping[mink:maxk]
                 if mode == "train":                
@@ -251,7 +257,7 @@ class parafac2:
                 else:
                     curr_U = self.centroids[curr_mapping]
 
-            approx = curr_U[final_idx - mink, first_idx, :] * self.S[final_idx, :]  # bs x rank
+            approx = curr_U * self.S[final_idx, :]  # bs x rank
             for m in range(1, self.tensor.order-1):
                 curr_idx = torch.tensor(self.tensor.indices[m][i: i+curr_batch_size], device=self.device, dtype=torch.long)
                 approx = approx * self.V[m-1][curr_idx, :]   # bs x rank

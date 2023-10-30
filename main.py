@@ -141,3 +141,6 @@ if __name__ == '__main__':
         else:
             sq_loss = _parafac2.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
             print(f'sparse: {sq_loss}')
+            
+    elif args.action == "test_init":
+        _parafac2 = parafac2(_tensor, device, False, args)
