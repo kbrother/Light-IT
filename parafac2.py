@@ -152,15 +152,13 @@ class parafac2:
         for m in range(_tensor.order-2):
             self.V[m] = torch.nn.Parameter(self.V[m])
         
-        '''
         with torch.no_grad():
             if args.is_dense:
                 sq_loss = self.L2_loss_dense(args, False, "parafac2")
             else:
                 sq_loss = self.L2_loss(args, False, "parafac2")
             print(f'fitness: {1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)}') 
-            print(f'square loss: {sq_loss}')
-       '''     
+            print(f'square loss: {sq_loss}')       
     
     '''
         Return a tensor of size 'batch size' x j_1*j_2*...*j_(d-2)        
@@ -248,8 +246,8 @@ class parafac2:
             sq_sum = torch.sum(first_mat * VtV)
             if is_train: 
                 sq_sum.backward()
-            _loss += sq_sum.item()
-            
+            _loss += sq_sum.item()  
+    
         # Correct non-zero terms                
         for i in tqdm(range(0, self.tensor.num_nnz, args.batch_lossnz)):
             curr_batch_size = min(args.batch_lossnz, self.tensor.num_nnz - i)
@@ -368,9 +366,9 @@ class parafac2:
     '''
     def init_tucker(self, args):
         #self.mapping = self.clustering(args)  # k x i_max
-        self.mapping_mask = torch.zeros(self.tensor.num_tensor, self.tensor.max_first, dtype=torch.bool, device=self.device)   # k x i_max
-        for _k in range(self.tensor.num_tensor):        
-            self.mapping_mask[_k, :self.tensor.first_dim[_k]] = True
+        #self.mapping_mask = torch.zeros(self.tensor.num_tensor, self.tensor.max_first, dtype=torch.bool, device=self.device)   # k x i_max
+        #for _k in range(self.tensor.num_tensor):        
+        #    self.mapping_mask[_k, :self.tensor.first_dim[_k]] = True
         self.G = torch.zeros([self.rank]*self.tensor.order, device=self.device, dtype=torch.double)    
         self.G = self.G.fill_diagonal_(1)
     
@@ -396,32 +394,32 @@ class parafac2:
             
             for i in range(0, self.tensor.num_tensor, batch_loss_zero):                
                 curr_batch_size = min(self.tensor.num_tensor - i, batch_loss_zero)
-                assert(curr_batch_size > 1)
-                curr_mapping = self.mapping[i:i+curr_batch_size, :]   # batch size x i_max
-                curr_U = self.centroids.data[curr_mapping] * self.U_mask[i:i+curr_batch_size, :, :]   # batch size x i_max x R
-                curr_S = self.S[i:i+curr_batch_size, :].data   # batch size x R
-                UtU = torch.bmm(torch.transpose(curr_U, 1, 2), curr_U)   # batch size x R x R                
-                StS = torch.bmm(curr_S.unsqueeze(-1), curr_S.unsqueeze(1))   # batch size x R x R
+                assert(curr_batch_size > 1)                
+                curr_mapping = self.mapping[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]]   # batch size'
+                curr_U = self.centroids.data[curr_mapping]   # batch size' x R
+                
+                final_idx = self.U_mapping[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]]
+                curr_S = self.S[i:i+curr_batch_size, :].data   # batch size' x R
+                UtU_input = torch.bmm(curr_U.unsqueeze(-1), curr_U.unsqueeze(1))   # batch size' x R x R                                                
+                UtU = torch.zeros((curr_batch_size, self.rank, self.rank), device=self.device, dtype=torch.double)                
+                UtU = UtU.index_add_(0, final_idx-i, UtU_input)
+                StS = torch.bmm(curr_S.unsqueeze(-1), curr_S.unsqueeze(1))                            
                 first_mat = first_mat + torch.sum(batch_kron(UtU, StS), dim=0)   # R^2 x R^2
            
             first_mat = VG @ first_mat  # i_2*...*i_(m-1) x R^2              
             sq_loss = torch.sum(first_mat * VG).item()          
-
+            
             # Correct non-zero terms
             for i in tqdm(range(0, self.tensor.num_nnz, batch_loss_nz)):
                 curr_batch_size = min(self.tensor.num_nnz - i, batch_loss_nz)                
                 assert(curr_batch_size > 1)
                 curr_vals = torch.tensor(self.tensor.values[i:i+curr_batch_size], dtype=torch.double, device=self.device)
                 first_idx = torch.tensor(self.tensor.indices[0][i:i+curr_batch_size], dtype=torch.long, device=self.device) 
-                last_idx = torch.tensor(self.tensor.indices[-1][i:i+curr_batch_size], dtype=torch.long, device=self.device) 
-                
-                min_k = torch.min(last_idx).item()
-                max_k = torch.max(last_idx).item()
-                # Prepare matrices
-                curr_mapping = self.mapping[min_k:max_k+1, :]   # k_dist x i_max
-                curr_U = self.centroids.data[curr_mapping] * self.U_mask[min_k:max_k+1]   # k_idst x i_max x R
-                            
-                first_mat = curr_U[last_idx - min_k, first_idx, :]  # batch size x rank
+                last_idx = torch.tensor(self.tensor.indices[-1][i:i+curr_batch_size], dtype=torch.long, device=self.device)                         
+
+                map_input = self.U_sidx[last_idx] + first_idx
+                u_input = self.mapping[map_input]    
+                first_mat = self.centroids.data[u_input]  # batch size x rank
                 for m in range(self.tensor.order-2):      
                     curr_idx = torch.tensor(self.tensor.indices[m+1][i:i+curr_batch_size], dtype=torch.long, device=self.device)
                     first_mat = face_split(first_mat, self.V[m][curr_idx, :])  

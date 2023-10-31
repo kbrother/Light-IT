@@ -7,6 +7,7 @@ import os
 import random
 import numpy as np
 import time
+import math
 from parafac2 import clear_memory
 
 # python main.py test_init -tp ../input/23-Irregular-Tensor/action.npy -de 1 -r 2 -d True -s 0
@@ -121,7 +122,7 @@ if __name__ == '__main__':
             clear_memory()
             with open(args.output_path + ".txt", 'a') as f:
                 f.write(f'cp time: {time.time() - start_time}\n')
-            start_time = time.time()
+            start_time = time.time()    
         _parafac2.als(args)        
         
         with open(args.output_path + ".txt", 'a') as f:
