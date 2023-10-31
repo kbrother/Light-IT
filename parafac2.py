@@ -553,6 +553,7 @@ class parafac2:
                  
             self.centroids.data = torch.bmm(first_mat.unsqueeze(1), torch.linalg.pinv(second_mat)).squeeze()                          
             
+            
     def als_V(self, args, mode):            
         with torch.no_grad():
             # Define mat_G
@@ -590,23 +591,24 @@ class parafac2:
                     # Build the first mat
                     curr_batch_size = min(args.tucker_batch_lossnz, self.tensor.num_tensor - i)        
                     assert(curr_batch_size > 1)
-                    curr_mapping = self.mapping[i:i+curr_batch_size, :]   # batch size x i_max
-                    curr_U = self.centroids.data[curr_mapping] * self.U_mask[i:i+curr_batch_size, :, :]   # batch size x i_max x R
-                    curr_S = self.S[i:i+curr_batch_size, :]  # bs x R
-
-                    curr_tensor = self.tensor.src_tensor_torch[i:i+curr_batch_size].to(self.device)  # bs x i_1 x i_2 x ... x i_(m-1)                 
-                    perm_dims = [0, mode+1, 1] + [m for m in range(2, self.tensor.order-1) if m != mode + 1]    
-                    curr_tensor = torch.permute(curr_tensor, perm_dims)   # bs x i_mode x i_1 x i_2 x ... x i_(m-1)  
-                    curr_tensor = torch.reshape(curr_tensor, (curr_batch_size, self.tensor.middle_dim[mode-1], -1))   # bs x i_mode x i_1* ..* i_(m-1)              
-                     
-                    USV = curr_U  # batch size x i_max x R                
-                    USV = batch_kron(USV, curr_S.unsqueeze(1))   # batch size x i_1 x R^2                    
+                    curr_mapping = self.mapping[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]]   # bs'
+                    curr_U = self.centroids.data[curr_mapping]  # bs' x rank
+                    curr_U_mapping = self.U_mapping[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]]  # bs'
+                    curr_S = self.S[curr_U_mapping]  # bs' x R
+                        
+                    curr_tensor = self.tensor.src_tensor_torch[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]].to(self.device)  # bs' x j_1 x j_2 x ... x j_(m-2)           
+                    perm_dims = [mode, 0] + [m for m in range(1, self.tensor.order-1) if m != mode]
+                    curr_tensor = torch.permute(curr_tensor, perm_dims)
+                    # j_(mode) x bs' x j_1 x ... x j_(m-2)
+                    curr_tensor = torch.reshape(curr_tensor, (curr_tensor.shape[0], -1))   
+                    # j_mode x bs'*j_1* ..* j_(m-2)                                                       
+                    USV = face_split(curr_U, curr_S)   # bs' x R^2                    
                     if self.tensor.order > 3:
-                        USV = batch_kron(USV, Vkron.repeat(curr_batch_size, 1, 1))   # batch size x i_1*...*i_(m-1) x R^(d-1)
-                    
-                    temp_fm = torch.bmm(curr_tensor, USV)   # batch size x i_m x R^(d-1)
-                    temp_fm = torch.bmm(temp_fm, mat_G.t().repeat(curr_batch_size, 1, 1))   # batch size x i_m x R
-                    first_mat = first_mat + torch.sum(temp_fm, dim=0)
+                        USV = batch_kron(USV, Vkron)  # bs'*j_1*...*j_(m-2) x R^(d-1)
+                                            
+                    temp_fm = curr_tensor @ USV   # j_(mode) x R^(d-1)
+                    temp_fm = temp_fm @ mat_G.t()   #  j_(mode) x R                    
+                    first_mat = first_mat + temp_fm
             else:
                 for i in tqdm(range(0, self.tensor.num_nnz, args.tucker_batch_lossnz)):
                     curr_batch_size = min(args.tucker_batch_lossnz, self.tensor.num_nnz - i) 
@@ -645,10 +647,14 @@ class parafac2:
             for i in tqdm(range(0, self.tensor.num_tensor, args.tucker_batch_alsnx)):  
                 curr_batch_size = min(self.tensor.num_tensor - i, args.tucker_batch_alsnx)
                 assert(curr_batch_size > 1)
-                curr_mapping = self.mapping[i:i+curr_batch_size, :]   # batch size x i_max
-                curr_U = self.centroids.data[curr_mapping] * self.U_mask[i:i+curr_batch_size, :, :]   # batch size x i_max x R
-                curr_S = self.S[i:i+curr_batch_size, :]  # bs x R
-                UtU = torch.bmm(torch.transpose(curr_U, 1, 2), curr_U)  # bs x R x R
+                curr_mapping = self.mapping[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]]   # bs'
+                curr_U = self.centroids.data[curr_mapping]  # bs' x rank
+                U_input = torch.bmm(curr_U.unsqueeze(-1), curr_U.unsqueeze(1))  # bs' x rank x rank
+                UtU = torch.zeros((curr_batch_size, self.rank, self.rank), device=self.device, dtype=torch.double)
+                curr_U_mapping = self.U_mapping[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]]  # bs'
+                UtU = UtU.index_add_(0, curr_U_mapping, U_input)    # bs x rank x rank
+                
+                curr_S = self.S[i:i+curr_batch_size, :]  # bs x R                
                 StS = torch.bmm(curr_S.unsqueeze(-1), curr_S.unsqueeze(1)) # bs x R x R
                 second_mat = second_mat + torch.sum(batch_kron(UtU, StS), dim=0)   # R^2 x R^2
                         
@@ -845,6 +851,7 @@ class parafac2:
             temp_perm = tuple([self.tensor.order-2] + [m for m in range(self.tensor.order-2)] + [self.tensor.order-1])
             self.G = torch.permute(self.G, temp_perm)
             
+            
     def als(self, args):                
         self.init_tucker(args) 
         if args.is_dense:
@@ -857,28 +864,28 @@ class parafac2:
         
         prev_fit = 0
         for e in range(args.epoch_als):                                 
-            self.als_G(args)                     
-            if args.is_dense:
-                sq_loss = self.L2_loss_tucker_dense(args.tucker_batch_lossnz)
-            else:
-                sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
-            curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)                        
-            print(f'als epoch: {e+1}, after g:{curr_fit}')                 
-            self.als_U(args)                                 
-            if args.is_dense:
-                sq_loss = self.L2_loss_tucker_dense(args.tucker_batch_lossnz)
-            else:
-                sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
-            curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)                        
-            print(f'als epoch: {e+1}, after u:{curr_fit}')                 
+            self.als_G(args)                                 
+            self.als_U(args)                                                
             clear_memory()
-            
-            '''
+                    
             for m in range(1, self.tensor.order-1):
-                self.als_G(args)                                            
-                self.als_V(args, m)                                        
+                self.als_G(args)                 
+                if args.is_dense:
+                    sq_loss = self.L2_loss_tucker_dense(args.tucker_batch_lossnz)
+                else:
+                    sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
+                curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)                        
+                print(f'als epoch: {e+1}, after g:{curr_fit}')                                 
+                self.als_V(args, m)             
+                if args.is_dense:
+                    sq_loss = self.L2_loss_tucker_dense(args.tucker_batch_lossnz)
+                else:
+                    sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
+                curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)                        
+                print(f'als epoch: {e+1}, after V:{curr_fit}')                                 
                 clear_memory()            
             
+            '''
             self.als_G(args)                                                             
             self.als_S(args)
             clear_memory()            
