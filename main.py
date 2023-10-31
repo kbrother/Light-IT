@@ -138,7 +138,8 @@ if __name__ == '__main__':
     
     elif args.action == "test_tucker_loss":
         _parafac2 = parafac2(_tensor, device, True, args)
-        _parafac2.init_tucker(args)        
+        _parafac2.init_tucker(args) 
+        _parafac2.mapping = _parafac2.clustering(args)
         _parafac2.G = torch.rand([_parafac2.rank]*_tensor.order, device=_parafac2.device, dtype=torch.double)   
         if args.is_dense:
             sq_loss = _parafac2.L2_loss_tucker_dense(args.tucker_batch_lossnz)

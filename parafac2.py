@@ -448,16 +448,16 @@ class parafac2:
             for i in tqdm(range(0, self.tensor.num_tensor, batch_size)):         
                 curr_batch_size = min(batch_size, self.tensor.num_tensor - i)
                 assert(curr_batch_size > 1)
-                curr_tensor = self.set_curr_tensor(curr_batch_size, i)    # batch size x i_max x J   
-                curr_U = self.centroids[self.mapping[i:i+curr_batch_size, :]] * self.U_mask[i:i+curr_batch_size, :, :] # batch size x i_max x R               
-                curr_G = torch.reshape(self.G, (self.rank, -1))    # R x R^(d-1)
-                curr_G = curr_G.unsqueeze(0).repeat(curr_batch_size, 1, 1)  # batch size x R x R^(d-1)
-                UG = torch.bmm(curr_U, curr_G)   # batch size x i_max x R^(d-1)
+                curr_tensor = self.set_curr_tensor(curr_batch_size, i)    # bs' x j_1*j_2*...*j_(d-2)         
+                curr_U = self.centroids[self.mapping[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]]] # bs' x R               
+                curr_G = torch.reshape(self.G, (self.rank, -1))    # R x R^(d-1)                
+                UG = curr_U @ curr_G   # bs' x R^(d-1)
                                             
-                curr_S = self.S[i:i+curr_batch_size, :].unsqueeze(1)  # batch size x 1 x R                               
-                VS = batch_kron(VKron.repeat(curr_batch_size, 1, 1), curr_S)   # batch size x j_1...j_(d-2) x R^(d-1)
-                VS = torch.transpose(VS, 1, 2)   # batch size x R^(d-1) x j_1...j_(d-2)
-                approx = torch.bmm(UG, VS)   # batch size x i_max x j_1...j_(d-2)                
+                curr_S = self.S[self.U_mapping[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]], :].unsqueeze(1)  # batch size' x 1 x R          
+                temp_bs = self.U_sidx[i+curr_batch_size] - self.U_sidx[i]
+                VS = batch_kron(VKron.repeat(temp_bs, 1, 1), curr_S)   # bs' x j_1...j_(d-2) x R^(d-1)
+                VS = torch.transpose(VS, 1, 2)   # bs' x R^(d-1) x j_1...j_(d-2) x j_1...j_(d-2)
+                approx = torch.bmm(UG.unsqueeze(1), VS).squeeze()   # bs' x j_1...j_(d-2)
                 curr_loss = torch.sum(torch.square(approx - curr_tensor))        
                 _loss += curr_loss.item()
 
