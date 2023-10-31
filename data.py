@@ -22,6 +22,7 @@ class irregular_tensor:
 
             temp_dims = [self.first_dim_sum] + list(self.middle_dim)
             self.src_tensor_torch = torch.zeros(temp_dims, dtype=torch.double)
+            # row_sum x i_2 x ... x i_(m-1)
             temp_sum = 0
             for i in range(self.num_tensor):
                 self.src_tensor_torch[temp_sum:(temp_sum + self.first_dim[i])] = torch.tensor(self.src_tensor[i], dtype=torch.double)
