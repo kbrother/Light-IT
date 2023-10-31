@@ -449,7 +449,7 @@ class parafac2:
                 assert(curr_batch_size > 1)
                 curr_tensor = self.set_curr_tensor(curr_batch_size, i)    # bs' x j_1*j_2*...*j_(d-2)         
                 curr_U = self.centroids[self.mapping[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]]] # bs' x R               
-                curr_G = torch.reshape(self.G, (self.rank, -1))    # R x R^(d-1)                
+                curr_G = torch.reshape(self.G, (self .rank, -1))    # R x R^(d-1)                
                 UG = curr_U @ curr_G   # bs' x R^(d-1)
                                             
                 curr_S = self.S[self.U_mapping[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]], :].unsqueeze(1)  # batch size' x 1 x R          
@@ -531,23 +531,19 @@ class parafac2:
                     curr_values = torch.tensor(curr_values, dtype=torch.double, device=self.device)  # bs'
                     XVSG = curr_values.unsqueeze(-1) * XVSG  # bs'x rank^(d-1)
                     
-                    XVSG = XVSG @ mat_G.t()   # bs' x rank                     
-                    temp_mapping = self.mapping[last_idx, first_idx]   # bs'
+                    XVSG = XVSG @ mat_G.t()   # bs' x rank          
+                    curr_idx = first_idx + self.U_sidx[last_idx]
+                    temp_mapping = self.mapping[curr_idx]   # bs'
                     first_mat = first_mat.index_add_(0, temp_mapping, XVSG)   
                 
             # Second mat
             for i in tqdm(range(0, self.tensor.num_tensor, args.tucker_batch_alsnx)):                
                 curr_batch_size = min(self.tensor.num_tensor - i, args.tucker_batch_alsnx)
-                assert(curr_batch_size > 1)
-                curr_S = self.S.data[i:i+curr_batch_size, :]   # bs x rank
-                StS = torch.bmm(curr_S.unsqueeze(-1), curr_S.unsqueeze(1))   # bs x rank x rank
-                StS = StS.unsqueeze(1).expand(-1, num_clusters, -1, -1)   # bs x num_cluster x rank x rank   
-                
-                curr_mapping = self.mapping[i:i+curr_batch_size, :]  # bs x num_cluster
-                curr_mapping_mask = self.mapping_mask[i:i+curr_batch_size, :]  # bs x num_cluster
-                curr_mapping = curr_mapping[curr_mapping_mask]
-                StS = StS[curr_mapping_mask]
-                
+                assert(curr_batch_size > 1)                
+                curr_idx = self.U_mapping[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]] # bs'
+                curr_mapping = self.mapping[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]] # bs'
+                curr_S = self.S.data[curr_idx, :]   # bs' x rank
+                StS = torch.bmm(curr_S.unsqueeze(-1), curr_S.unsqueeze(1))   # bs' x rank x rank                                     
                 second_mat = second_mat.index_add_(0, curr_mapping, StS)   # i_max x rank x rank
                  
             for i in tqdm(range(num_clusters)):
@@ -868,11 +864,17 @@ class parafac2:
             else:
                 sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
             curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)                        
-            print(f'als epoch: {e+1}, after g:{curr_fit}')     
-            '''
+            print(f'als epoch: {e+1}, after g:{curr_fit}')                 
             self.als_U(args)                                 
+            if args.is_dense:
+                sq_loss = self.L2_loss_tucker_dense(args.tucker_batch_lossnz)
+            else:
+                sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
+            curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)                        
+            print(f'als epoch: {e+1}, after u:{curr_fit}')                 
             clear_memory()
             
+            '''
             for m in range(1, self.tensor.order-1):
                 self.als_G(args)                                            
                 self.als_V(args, m)                                        
