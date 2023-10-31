@@ -614,28 +614,26 @@ class parafac2:
                     curr_batch_size = min(args.tucker_batch_lossnz, self.tensor.num_nnz - i) 
                     assert(curr_batch_size > 1)
                         
-                    first_idx = self.tensor.indices[0][i:i+curr_batch_size]   # bs'
-                    first_idx = torch.tensor(first_idx, dtype=torch.long, device=self.device)  # bs'
-                    last_idx = self.tensor.indices[-1][i:i+curr_batch_size]   # bs'
-                    last_idx = torch.tensor(last_idx, dtype=torch.long, device=self.device)  # bs'
-                    min_k = torch.min(last_idx)
-                    max_k = torch.max(last_idx) + 1
-                    curr_mapping = self.mapping[min_k:max_k, :]   # bs' x i_max
-                    curr_U = self.centroids.data[curr_mapping] * self.U_mask[min_k:max_k]   # bs' x i_max x R
+                    first_idx = self.tensor.indices[0][i:i+curr_batch_size]   # bs
+                    first_idx = torch.tensor(first_idx, dtype=torch.long, device=self.device)  # bs
+                    last_idx = self.tensor.indices[-1][i:i+curr_batch_size]   # bs
+                    last_idx = torch.tensor(last_idx, dtype=torch.long, device=self.device)  # bs
                     
-                    XUSV = curr_U[last_idx - min_k, first_idx, :]  # bs' x R
-                    XUSV = face_split(XUSV, self.S[last_idx, :])   # bs' x R^2
-
+                    curr_mapping = self.mapping[first_idx + self.U_sidx[last_idx]]   # bs
+                    curr_U = self.centroids.data[curr_mapping]  # bs x R                    
+                    curr_S = self.S[last_idx]  # bs x R
+                    
+                    USV = face_split(curr_U, curr_S)  # bs x R^2
                     for m in range(1, self.tensor.order - 1):
                         if m == mode: continue
                         else:
                             curr_idx = self.tensor.indices[m][i:i+curr_batch_size]        
                             curr_idx = torch.tensor(curr_idx, dtype=torch.long, device=self.device)  # bs'                            
-                            XUSV = face_split(XUSV, self.V[m-1][curr_idx, :])                                                                 # XUSV: bs' x R^(d-1)
+                            USV = face_split(USV, self.V[m-1][curr_idx, :])                                                                 # XUSV: bs' x R^(d-1)
 
                     curr_values = self.tensor.values[i:i+curr_batch_size]   # bs'
                     curr_values = torch.tensor(curr_values, dtype=torch.double, device=self.device)  # bs'
-                    XUSV = curr_values.unsqueeze(-1) * XUSV  # bs' x R^(d-1)
+                    XUSV = curr_values.unsqueeze(-1) * USV  # bs' x R^(d-1)
                     temp_first_mat = XUSV @ mat_G.t()   # bs' x R
 
                     curr_idx = self.tensor.indices[mode][i:i+curr_batch_size]  # bs'
@@ -652,7 +650,7 @@ class parafac2:
                 U_input = torch.bmm(curr_U.unsqueeze(-1), curr_U.unsqueeze(1))  # bs' x rank x rank
                 UtU = torch.zeros((curr_batch_size, self.rank, self.rank), device=self.device, dtype=torch.double)
                 curr_U_mapping = self.U_mapping[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]]  # bs'
-                UtU = UtU.index_add_(0, curr_U_mapping, U_input)    # bs x rank x rank
+                UtU = UtU.index_add_(0, curr_U_mapping - i, U_input)    # bs x rank x rank
                 
                 curr_S = self.S[i:i+curr_batch_size, :]  # bs x R                
                 StS = torch.bmm(curr_S.unsqueeze(-1), curr_S.unsqueeze(1)) # bs x R x R
