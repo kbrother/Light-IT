@@ -495,16 +495,15 @@ class parafac2:
                 for i in tqdm(range(0, self.tensor.num_tensor, args.tucker_batch_lossnz)):                
                     curr_batch_size = min(args.tucker_batch_lossnz, self.tensor.num_tensor - i)
                     assert(curr_batch_size > 1)
-                    curr_mapping = self.mapping[i:i+curr_batch_size, :]  # bs x i_max
-                    curr_mapping_mask = self.mapping_mask[i:i+curr_batch_size, :]  # bs x i_max
-                    curr_S = self.S[i:i+curr_batch_size, :]   # bs x R
-
-                    XVSG = batch_kron(Vkron.repeat(curr_batch_size, 1, 1), curr_S.unsqueeze(1))  # bs x j_1*...*j_(d-2) x R                 ^(d-1)
-                    XVSG = torch.bmm(XVSG, mat_G.t().repeat(curr_batch_size, 1, 1))   # bs x j_1*...*j_(d-2) x R
-                    curr_tensor = self.set_curr_tensor(curr_batch_size, i)  # batch size x i_max x j_1*j_2*...*j_(d-2)      
-                    XVSG = torch.bmm(curr_tensor, XVSG)   # bs x i_max x R
-                    XVSG = torch.reshape(XVSG, (curr_batch_size*self.tensor.max_first, -1))  # bs*i_max x R                   
-                    first_mat = first_mat.index_add_(0, curr_mapping.flatten(), XVSG)
+                    curr_idx = self.U_mapping[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]]  # bs'
+                    curr_S = self.S[curr_idx, :]   # bs' x R
+                    VS = batch_kron(Vkron.repeat(curr_S.shape[0], 1, 1), curr_S.unsqueeze(1))  # bs' x j_1*...*j_(d-2) x R^(d-1)
+                    VSG = torch.bmm(VS, mat_G.t().repeat(curr_S.shape[0], 1, 1))   # bs' x j_1*...*j_(d-2) x R
+                    curr_tensor = self.set_curr_tensor(curr_batch_size, i)  # bs' x j_1*j_2*...*j_(d-2)     
+                    
+                    XVSG = torch.bmm(curr_tensor.unsqueeze(1), VSG).squeeze()   # bs' x R
+                    curr_mapping = self.mapping[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]]  # bs'
+                    first_mat = first_mat.index_add_(0, curr_mapping, XVSG)
             else:                                        
                 for i in tqdm(range(0, self.tensor.num_nnz, args.tucker_batch_lossnz)):          
                     curr_batch_size = min(args.tucker_batch_lossnz, self.tensor.num_nnz - i)
