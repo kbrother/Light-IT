@@ -697,15 +697,18 @@ class parafac2:
                 for i in tqdm(range(0, self.tensor.num_tensor, args.tucker_batch_lossnz)):                                  
                     curr_batch_size = min(args.tucker_batch_lossnz, self.tensor.num_tensor - i)
                     assert(curr_batch_size > 1)  
-                    curr_mapping = self.mapping[i:i+curr_batch_size, :]   # batch size x i_max
-                    curr_U = self.centroids.data[curr_mapping] * self.U_mask[i:i+curr_batch_size, :, :]   # batch size x i_max x R
+                    curr_mapping = self.mapping[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]]   # bs'
+                    curr_U = self.centroids.data[curr_mapping]   # bs' x R
+                    UV = batch_kron(curr_U.unsqueeze(1), Vkron.repeat(curr_U.shape[0], 1, 1))   # bs' x i_2*...*i_m-1 x R^(d-1)
                     # first mat
 
-                    curr_tensor = self.tensor.src_tensor_torch[i:i+curr_batch_size].to(self.device)  # bs x i_max x i_2 x ... x i_(m-1)                                          
-                    curr_tensor = torch.reshape(curr_tensor, (curr_batch_size, -1))   # bs x i_1*i_2* ... *i_(d-1) 
-                    temp_fm = batch_kron(curr_U, Vkron.repeat(curr_batch_size, 1, 1))  # batch size x i_1*i_2*...i_m-1 x R^(d-1)
-                    temp_fm = torch.bmm(curr_tensor.unsqueeze(1), temp_fm)   # batch size x 1 x R^(d-1)
-                    first_mat[i:i+curr_batch_size, :] = temp_fm.squeeze() @ mat_G.t()  # batch size x R         
+                    curr_tensor = self.tensor.src_tensor_torch[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]].to(self.device)  # bs' x i_2 x ... x i_(m-1)                                          
+                    curr_tensor = torch.reshape(curr_tensor, (curr_tensor.shape[0], -1))   # bs' x i_2*...*i_(m-1)                    
+                    temp_fm = torch.bmm(curr_tensor.unsqueeze(1), UV).squeeze()   # bs' x R^(d-1)
+                    temp_fm = temp_fm.squeeze() @ mat_G.t()  # bs' x R
+                    
+                    curr_U_mapping = self.U_mapping[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]]  # bs'
+                    first_mat = first_mat.index_add_(0, curr_U_mapping, temp_fm)
                                         
             else:
                 for i in tqdm(range(0, self.tensor.num_nnz, args.tucker_batch_lossnz)):    
