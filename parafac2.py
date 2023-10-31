@@ -867,32 +867,19 @@ class parafac2:
         
         prev_fit = 0
         for e in range(args.epoch_als):                                 
-            self.als_G(args)                                 
-            self.als_U(args)                                                
+            self.als_G(args)                             
+            self.als_U(args)       
             clear_memory()
-                    
+                        
             for m in range(1, self.tensor.order-1):
-                self.als_G(args)                                 
-                self.als_V(args, m)                                         
+                self.als_G(args)                                                 
+                self.als_V(args, m)                       
                 clear_memory()            
-                    
-            self.als_G(args)                 
-            if args.is_dense:
-                sq_loss = self.L2_loss_tucker_dense(args.tucker_batch_lossnz)
-            else:
-                sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
-            curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)                        
-            print(f'als epoch: {e+1}, after g:{curr_fit}')                                 
-            self.als_S(args)
-            if args.is_dense:
-                sq_loss = self.L2_loss_tucker_dense(args.tucker_batch_lossnz)
-            else:
-                sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
-            curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)                        
-            print(f'als epoch: {e+1}, after s:{curr_fit}')                          
+            
+            self.als_G(args)                                                                        
+            self.als_S(args)            
             clear_memory()            
             
-            '''
             if args.is_dense:
                 sq_loss = self.L2_loss_tucker_dense(args.tucker_batch_lossnz)
             else:
@@ -905,7 +892,7 @@ class parafac2:
             if curr_fit - prev_fit < 1e-4:                 
                 break
             prev_fit = curr_fit                                      
-            '''
+            
         final_V = [_v.data.clone().detach().cpu() for _v in self.V]      
         torch.save({
             'fitness': curr_fit, 'mapping': self.mapping,
