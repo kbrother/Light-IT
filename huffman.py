@@ -54,25 +54,18 @@ def huffman_encoding(indices):
 '''
 def encoding(_tensor, cluster_result):
     cluster_result = cluster_result.numpy().tolist()
-    total_map = []
-    for i in range(_tensor.num_tensor):
-        curr_map = [cluster_result[i][j] for j in range(_tensor.first_dim[i])]
-        total_map.append(curr_map)
-    
-    total_map = list(itertools.chain.from_iterable(total_map))
-    result_dict = huffman_encoding(total_map)
+    result_dict = huffman_encoding(cluster_result)
     
     num_bits = 0
-    for i in range(_tensor.num_tensor):
-        for j in range(_tensor.first_dim[i]):
-            num_bits += len(result_dict[cluster_result[i][j]])
+    for i in range(len(cluster_result)):        
+        num_bits += len(result_dict[cluster_result[i]])
                                     
     return num_bits
     
     
 # python huffman.py -tp ../data/23-Irregular-Tensor/cms.npy -rp results/cms-lr0.01-rank5.pt -r 5 -de 0 -d False
 # python huffman.py -tp ../data/23-Irregular-Tensor/mimic3.npy -rp results/mimic3-lr0.01-rank5.pt -r 5 -de 4 -d False
-# python huffman.py -tp ../data/23-Irregular-Tensor/delicious.pickle -rp results/delicious_r5_lr0.01_cp.pt -r 5 -de 6 -d False
+# python huffman.py -tp ../input/23-Irregular-Tensor/delicious.pickle -rp results/delicious_r5_lr0.01.pt -r 5 -de 0 -d False -cp True
 # python huffman.py -tp ../data/23-Irregular-Tensor/enron.pickle -rp results/enron_r5_lr0.01_cp.pt -r 5 -de 6 -d False
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -80,34 +73,41 @@ if __name__ == '__main__':
     parser.add_argument('-rp', "--result_path", type=str)       
     parser.add_argument('-r', "--rank", type=int)  
     parser.add_argument('-fp', "--factor_path", type=str)            
+    parser.add_argument('-cp', "--is_cp", type=str)
     parser.add_argument('-d', "--is_dense", type=str, default="error")
     parser.add_argument(
         "-de", "--device",
         action="store", type=int
     )    
+
     parser.add_argument(
-        "-bif", "--batch_init_factor",
-        action="store", default=2**6, type=int
+        "-bz", "--batch_lossz",
+        action="store", default=2**10, type=int
+    )
+    
+    parser.add_argument(
+        "-bnz", "--batch_lossnz",
+        action="store", default=2**22, type=int
     )
     
     parser.add_argument(
         "-cb", "--cluster_batch",
-        action="store", default=64, type=int
-    )
-        
-    parser.add_argument(
-        "-b", "--batch_size",
-        action="store", default=2**7, type=int
+        action="store", default=128, type=int
     )
     
     parser.add_argument(
         "-tbz", "--tucker_batch_lossz",
-        action="store", default=2**6, type=int
+        action="store", default=2**10, type=int
     )
     
     parser.add_argument(
-        "-tbn", "--tucker_batch_lossnz",
-        action="store", default=2**5, type=int
+        "-tbnz", "--tucker_batch_lossnz",
+        action="store", default=2**10, type=int
+    )
+    
+    parser.add_argument(
+        "-tbnx", "--tucker_batch_alsnx",
+        action="store", default=2**10, type=int
     )
     
     args = parser.parse_args()    
@@ -117,6 +117,11 @@ if __name__ == '__main__':
         args.is_dense = False
     else:
         assert("wrong input")
+        
+    if args.is_cp == "True":
+        args.is_cp= True
+    else:
+        args.is_cp =False
     
     if args.device == None:
         device = torch.device("cpu")
@@ -128,34 +133,27 @@ if __name__ == '__main__':
     
     _parafac2 = parafac2(_tensor, device, False, args)        
     _parafac2.centroids.data.copy_(result_dict['centroids'].to(device))
-    _parafac2.U.data.copy_(result_dict['U'].to(device))
     for m in range(_tensor.order-2):
         _parafac2.V[m].data.copy_(result_dict['V'][m].to(device))
     _parafac2.S.data.copy_(result_dict['S'].to(device))
         
-    if 'mapping' in result_dict:
-        _parafac2.mapping = result_dict['mapping'].to(device) # k x i_max
-        _parafac2.mapping_mask = torch.zeros(_tensor.k, _tensor.i_max, dtype=torch.bool, device=device)   # k x i_max
-        for _k in range(_tensor.k):        
-            _parafac2.mapping_mask[_k, :_tensor.i[_k]] = True
+    _parafac2.mapping = result_dict['mapping'].to(device) # k x i_max
+    if not args.is_cp:
         _parafac2.G = result_dict['G'].to(device)    
-        with torch.no_grad():
-            if args.is_dense:
-                sq_loss = _parafac2.L2_loss_tucker_dense(args.tucker_batch_loss_nz)
+    with torch.no_grad():
+        if args.is_dense:
+            if args.is_cp:
+                with toch.no_grad():
+                    sq_loss = _parafac2.L2_loss_dense(args, False, "test")
+            else:
+                sq_loss = _parafac2.L2_loss_tucker_dense(args.tucker_batch_lossnz)
+        else:
+            if args.is_cp:
+                with torch.no_grad():
+                    sq_loss = _parafac2.L2_loss(args, False, "test")
             else:
                 sq_loss = _parafac2.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)                
-            print(f'fitness: {1 - math.sqrt(sq_loss)/math.sqrt(_tensor.sq_sum)}')
-        cluster_result = result_dict['mapping'].cpu()  # k x i_max
-    else:
-        with torch.no_grad():
-            cluster_result = _parafac2.clustering(args)
-            U_clustered = _parafac2.centroids[cluster_result]    # k x i_max x rank         
-            U_clustered = U_clustered * _parafac2.U_mask
-            if args.is_dense:
-                sq_loss = _parafac2.L2_loss_dense(False, args.batch_size, U_clustered)
-            else:
-                sq_loss = _parafac2.L2_loss(False, args.batch_size, U_clustered)
-            print(f'fitness: {1 - math.sqrt(sq_loss)/math.sqrt(_tensor.sq_sum)}')
-        cluster_result = cluster_result.cpu()  # k x i_max
+        print(f'fitness: {1 - math.sqrt(sq_loss)/math.sqrt(_tensor.sq_sum)}')
+    cluster_result = result_dict['mapping'].cpu()  # k x i_max
         
     print(f'num params: {encoding(_tensor, cluster_result)/64}')
