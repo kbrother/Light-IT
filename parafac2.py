@@ -297,16 +297,28 @@ class parafac2:
         # Clustering
         cluster_label = torch.zeros(self.num_first_dim, dtype=torch.long, device=self.device)
         with torch.no_grad():
-            for i in range(0, self.tensor.num_tensor, args.cluster_batch):                
-                curr_batch_size = min(self.tensor.num_tensor - i, args.cluster_batch)
-                assert(curr_batch_size > 1)
-                #dist = torch.zeros((self.tensor.max_first, curr_batch_size, self.tensor.max_first), device=self.device)   # i_max x batch size x i_max
-                curr_U = self.U[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]]  # bs' x rank                
-                curr_dist = curr_U.unsqueeze(0) - self.centroids.unsqueeze(1) # num_cents x bs' x rank
-                curr_dist = torch.sum(torch.square(curr_dist), dim=-1) # num_cents x bs'
-                #dist[j,:,:] = curr_dist
-                    
-                cluster_label[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]] = torch.argmin(curr_dist, dim=0)  # bs'
+            if args.is_dense:
+                for i in range(0, self.num_first_dim, args.cluster_batch):                
+                    curr_batch_size = min(self.num_first_dim - i, args.cluster_batch)
+                    assert(curr_batch_size > 1)
+                    #dist = torch.zeros((self.tensor.max_first, curr_batch_size, self.tensor.max_first), device=self.device)   # i_max x batch size x i_max
+                    curr_U = self.U[i:i+curr_batch_size]  # bs' x rank                
+                    curr_dist = curr_U.unsqueeze(0) - self.centroids.unsqueeze(1) # num_cents x bs' x rank
+                    curr_dist = torch.sum(torch.square(curr_dist), dim=-1) # num_cents x bs'
+                    #dist[j,:,:] = curr_dist
+
+                    cluster_label[i:i+curr_batch_size] = torch.argmin(curr_dist, dim=0)  # bs'
+            else:
+                for i in range(0, self.tensor.num_tensor, args.cluster_batch):                
+                    curr_batch_size = min(self.tensor.num_tensor - i, args.cluster_batch)
+                    assert(curr_batch_size > 1)
+                    #dist = torch.zeros((self.tensor.max_first, curr_batch_size, self.tensor.max_first), device=self.device)   # i_max x batch size x i_max
+                    curr_U = self.U[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]]  # bs' x rank                
+                    curr_dist = curr_U.unsqueeze(0) - self.centroids.unsqueeze(1) # num_cents x bs' x rank
+                    curr_dist = torch.sum(torch.square(curr_dist), dim=-1) # num_cents x bs'
+                    #dist[j,:,:] = curr_dist
+
+                    cluster_label[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]] = torch.argmin(curr_dist, dim=0)  # bs'
         return cluster_label
         
         
