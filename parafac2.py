@@ -336,14 +336,24 @@ class parafac2:
                 self.L2_loss(args, True, "train")
                 
             # cluster loss
-            for i in range(0, self.tensor.num_tensor, args.batch_lossz):
-                curr_batch_size = min(args.batch_lossz, self.tensor.num_tensor - i)
-                assert(curr_batch_size > 1)
-                curr_mapping = self.mapping[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]]   # bs'
-                curr_U = self.U[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]] 
-                curr_U_cluster = self.centroids[curr_mapping]
-                cluster_loss = torch.sum(torch.square(curr_U_cluster - curr_U.detach()))            
-                cluster_loss.backward()
+            if args.is_dense:
+                for i in range(0, self.num_first_dim, args.batch_lossz):                
+                    curr_batch_size = min(args.batch_lossz, self.num_first_dim - i)
+                    assert(curr_batch_size > 1)
+                    curr_mapping = self.mapping[i:i+curr_batch_size]   # bs'
+                    curr_U = self.U[i:i+curr_batch_size] 
+                    curr_U_cluster = self.centroids[curr_mapping]
+                    cluster_loss = torch.sum(torch.square(curr_U_cluster - curr_U.detach()))            
+                    cluster_loss.backward()
+            else:
+                for i in range(0, self.tensor.num_tensor, args.batch_lossz):                
+                    curr_batch_size = min(args.batch_lossz, self.tensor.num_tensor - i)
+                    assert(curr_batch_size > 1)
+                    curr_mapping = self.mapping[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]]   # bs'
+                    curr_U = self.U[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]] 
+                    curr_U_cluster = self.centroids[curr_mapping]
+                    cluster_loss = torch.sum(torch.square(curr_U_cluster - curr_U.detach()))            
+                    cluster_loss.backward()
             #del curr_mapping, curr_U, curr_U_cluster
             #clear_memory()
             
