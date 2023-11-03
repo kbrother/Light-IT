@@ -185,12 +185,12 @@ class parafac2:
     '''
     def L2_loss_dense(self, args, is_train, mode):
         _loss = 0            
-        for i in tqdm(range(0, self.num_first_dim, args.batch_lossz)):                        
+        for i in tqdm(range(0, self.num_first_dim, args.batch_lossnz)):                        
             Vprod = self.V[0]
             for j in range(1, self.tensor.order-2):
                 Vprod = khatri_rao(Vprod, self.V[j])   # i_2 * ... * i_(m-1) x rank        
        
-            curr_batch_size = min(args.batch_lossz, self.num_first_dim - i) 
+            curr_batch_size = min(args.batch_lossnz, self.num_first_dim - i) 
             assert(curr_batch_size > 1)
             s_idx = self.U_mapping[i:i+curr_batch_size]
             curr_S = self.S[s_idx, :].unsqueeze(1)  # bs' x 1 x rank
@@ -298,7 +298,7 @@ class parafac2:
         cluster_label = torch.zeros(self.num_first_dim, dtype=torch.long, device=self.device)
         with torch.no_grad():
             if args.is_dense:
-                for i in range(0, self.num_first_dim, args.cluster_batch):                
+                for i in tqdm(range(0, self.num_first_dim, args.cluster_batch)):                
                     curr_batch_size = min(self.num_first_dim - i, args.cluster_batch)
                     assert(curr_batch_size > 1)
                     #dist = torch.zeros((self.tensor.max_first, curr_batch_size, self.tensor.max_first), device=self.device)   # i_max x batch size x i_max
@@ -337,8 +337,8 @@ class parafac2:
                 
             # cluster loss
             if args.is_dense:
-                for i in range(0, self.num_first_dim, args.batch_lossz):                
-                    curr_batch_size = min(args.batch_lossz, self.num_first_dim - i)
+                for i in range(0, self.num_first_dim, args.batch_lossnz):                
+                    curr_batch_size = min(args.batch_lossnz, self.num_first_dim - i)
                     assert(curr_batch_size > 1)
                     curr_mapping = self.mapping[i:i+curr_batch_size]   # bs'
                     curr_U = self.U[i:i+curr_batch_size] 
@@ -346,8 +346,8 @@ class parafac2:
                     cluster_loss = torch.sum(torch.square(curr_U_cluster - curr_U.detach()))            
                     cluster_loss.backward()
             else:
-                for i in range(0, self.tensor.num_tensor, args.batch_lossz):                
-                    curr_batch_size = min(args.batch_lossz, self.tensor.num_tensor - i)
+                for i in range(0, self.tensor.num_tensor, args.batch_lossnz):                
+                    curr_batch_size = min(args.batch_lossnz, self.tensor.num_tensor - i)
                     assert(curr_batch_size > 1)
                     curr_mapping = self.mapping[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]]   # bs'
                     curr_U = self.U[self.U_sidx[i]:self.U_sidx[i+curr_batch_size]] 
