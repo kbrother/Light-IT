@@ -48,11 +48,6 @@ if __name__ == '__main__':
         action="store", type=int,
     )
 
-    parser.add_argument(
-        "-cb", "--cluster_batch",
-        action="store", default=128, type=int
-    )
-
     args = parser.parse_args()    
     torch.manual_seed(args.seed)
     random.seed(args.seed)
