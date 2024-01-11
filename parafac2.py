@@ -103,7 +103,7 @@ class parafac2:
             
             # Normalize U
             self.U = self.U @ _H   # i_sum x rank
-            
+        '''    
         UtU_input = torch.bmm(self.U.unsqueeze(-1), self.U.unsqueeze(1))   # i_sum x rank x rank                
         UtU = torch.zeros((self.tensor.num_tensor, self.rank, self.rank), device=self.device, dtype=torch.double)
         UtU = UtU.index_add_(0, self.U_mapping, UtU_input)   # k x rank x rank
@@ -111,7 +111,7 @@ class parafac2:
         HtH = _H.t() @ _H
         #iden = torch.diag(torch.ones(self.rank)).to(self.device)
         print(torch.mean(torch.abs(UtU - HtH.unsqueeze(0))))        
-            
+        '''   
 
     def __init__(self, _tensor, device, require_init, args):      
         # Intialization
