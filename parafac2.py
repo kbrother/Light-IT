@@ -608,9 +608,9 @@ class parafac2:
                     for m in range(1, self.tensor.order-1):
                         if m == mode: continue
                         if _cnt == 0:
-                            Vkron = self.V[m-1].unsqueeze()  # 1 x i_m x R
+                            Vkron = self.V[m-1].unsqueeze(0)  # 1 x i_m x R
                         else:
-                            Vkron = batch_kron(Vkron, self.V[m-1])
+                            Vkron = batch_kron(Vkron, self.V[m-1].unsqueeze(0))
                         _cnt += 1
                     Vkron = Vkron.squeeze()   # i_2*...*i_(d-1) x R^(d-3)
          
@@ -634,8 +634,8 @@ class parafac2:
                     # j_mode x bs'*j_1* ..* j_(m-2)                                                       
                     USV = face_split(curr_U, curr_S)   # bs' x R^2                    
                     if self.tensor.order > 3:
-                        USV = batch_kron(USV, Vkron)  # bs'*j_1*...*j_(m-2) x R^(d-1)
-                                            
+                        USV = batch_kron(USV.unsqueeze(0), Vkron.unsqueeze(0)).squeeze()  # bs'*j_1*...*j_(m-2) x R^(d-1)
+                        
                     temp_fm = curr_tensor @ USV   # j_(mode) x R^(d-1)
                     temp_fm = temp_fm @ mat_G.t()   #  j_(mode) x R                    
                     first_mat = first_mat + temp_fm
