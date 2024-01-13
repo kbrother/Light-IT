@@ -533,9 +533,9 @@ class parafac2:
                     VX = torch.bmm(torch.transpose(temp_V, 1, 2), curr_tensor)   # bs' x R x j_2*...*j_(d-2)     
                     
                     curr_idx = self.U_mapping[i:i+curr_batch_size]  # bs'
-                    VS = self.S[curr_idx, :]   # bs' x R
+                    VS = self.S[curr_idx, :].unsqueeze(1)   # bs' x R
                     if self.tensor.order > 3:
-                        VS = batch_kron(Vkron.repeat(curr_batch_size, 1, 1), VS.unsqueeze(1))  # bs' x j_2*...*j_(d-2) x R^(d-2)
+                        VS = batch_kron(Vkron.repeat(curr_batch_size, 1, 1), VS)  # bs' x j_2*...*j_(d-2) x R^(d-2)
                     VXVS = torch.bmm(VX, VS)  # bs' x R x R^(d-2)    
                     XVS = torch.reshape(VXVS, (curr_batch_size, -1)).unsqueeze(1)   # bs' X 1 X R^(d-1)                    
                     XVSG = torch.bmm(XVS, mat_G.t().repeat(curr_batch_size, 1, 1)).squeeze()   # bs' x R                                        
