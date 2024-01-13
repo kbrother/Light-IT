@@ -503,12 +503,14 @@ class parafac2:
             # Define Vkron
             Vkron = None
             if args.is_dense:
-                for m in range(0, self.tensor.order-2):
-                    if m == 0:
+                for m in range(1, self.tensor.order-2):
+                    if m == 1:
                         Vkron = self.V[m].data.unsqueeze(0)  # 1 x j_1 x R
                     else:
                         Vkron = batch_kron(Vkron, self.V[m].data.unsqueeze(0))
-                Vkron = Vkron.squeeze()   # j_1*...*j_(d-2) x R^(d-2)
+                        
+                if self.tensor.order > 3:
+                    Vkron = Vkron.squeeze()   # j_2*...*j_(d-2) x R^(d-2)
 
             # Define VtV
             VtV = None
@@ -524,14 +526,19 @@ class parafac2:
             if args.is_dense:                
                 for i in tqdm(range(0, self.num_first_dim, args.tucker_batch_lossnz)):                
                     curr_batch_size = min(args.tucker_batch_lossnz, self.num_first_dim - i)
-                    assert(curr_batch_size > 1)
-                    curr_idx = self.U_mapping[i:i+curr_batch_size]  # bs'
-                    curr_S = self.S[curr_idx, :]   # bs' x R
-                    VS = batch_kron(Vkron.repeat(curr_S.shape[0], 1, 1), curr_S.unsqueeze(1))  # bs' x j_1*...*j_(d-2) x R^(d-1)
-                    VSG = torch.bmm(VS, mat_G.t().repeat(curr_S.shape[0], 1, 1))   # bs' x j_1*...*j_(d-2) x R
-                    curr_tensor = self.set_curr_tensor_new(curr_batch_size, i, 0)  # bs' x j_1*j_2*...*j_(d-2)     
+                    assert(curr_batch_size > 1)                    
+                    curr_tensor = self.set_curr_tensor_new(curr_batch_size, i, 0)  # bs'xj_1*j_2*...*j_(d-2)     
+                    curr_tensor = torch.reshape(curr_tensor, (curr_batch_size, self.V[0].shape[0], -1))   # bs' x j_1 x j_2*...*j_(d-2)     
+                    temp_V = self.V[0].repeat(curr_batch_size, 1, 1)   # bs' x j_1 x R
+                    VX = torch.bmm(torch.transpose(temp_V, 1, 2), curr_tensor)   # bs' x R x j_2*...*j_(d-2)     
                     
-                    XVSG = torch.bmm(curr_tensor.unsqueeze(1), VSG).squeeze()   # bs' x R
+                    curr_idx = self.U_mapping[i:i+curr_batch_size]  # bs'
+                    VS = self.S[curr_idx, :]   # bs' x R
+                    if self.tensor.order > 3:
+                        VS = batch_kron(Vkron.repeat(curr_batch_size, 1, 1), VS.unsqueeze(1))  # bs' x j_2*...*j_(d-2) x R^(d-2)
+                    VXVS = torch.bmm(VX, VS)  # bs' x R x R^(d-2)    
+                    XVS = torch.reshape(VXVS, (curr_batch_size, -1)).unsqueeze(1)   # bs' X 1 X R^(d-1)                    
+                    XVSG = torch.bmm(XVS, mat_G.t().repeat(curr_batch_size, 1, 1)).squeeze()   # bs' x R                                        
                     curr_mapping = self.mapping[i:i+curr_batch_size]  # bs'
                     first_mat = first_mat.index_add_(0, curr_mapping, XVSG)
             else:                                        
@@ -898,9 +905,22 @@ class parafac2:
         prev_fit = 0
         for e in range(args.epoch_als):                                 
             self.als_G(args)                                        
-            self.als_U(args)                        
-            clear_memory()
-                                                
+            if args.is_dense:
+                sq_loss = self.L2_loss_tucker_dense(args.tucker_batch_lossnz)
+            else:
+                sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
+            curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)            
+            print(f'before u, als epoch: {e+1}, after s:{curr_fit}')        
+            self.als_U(args)
+            if args.is_dense:
+                sq_loss = self.L2_loss_tucker_dense(args.tucker_batch_lossnz)
+            else:
+                sq_loss = self.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
+            curr_fit = 1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)            
+            print(f'after u, als epoch: {e+1}, after s:{curr_fit}')        
+            clear_memory()                        
+            
+            '''
             for m in range(1, self.tensor.order-1):
                 self.als_G(args)               
                 self.als_V(args, m)                              
@@ -918,6 +938,7 @@ class parafac2:
             with open(args.output_path + ".txt", 'a') as f:
                 f.write(f'als epoch: {e+1}, after s:{curr_fit}\n')
             print(f'als epoch: {e+1}, after s:{curr_fit}')                        
+            '''
                         
             if curr_fit - prev_fit < 1e-4:                 
                 break
