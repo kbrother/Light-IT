@@ -175,25 +175,40 @@ class parafac2:
     
     
     '''
+        Return a tensor of size 'batch size' x j_1*j_2*...*j_(d-2)        
+    '''
+    def set_curr_tensor_custom(self, input_idx, _order):        
+        curr_tensor = self.tensor.src_tensor_torch[input_idx].to(self.device)  # bs' x i_2 x ... x i_(m-1)  
+        num_rows = 1
+        for i in range(_order + 1):
+            num_rows *= curr_tensor.shape[i]
+        
+        curr_tensor = torch.reshape(curr_tensor, (num_rows, -1))   # bs' x i_2 * ... * i_(m-1) 
+        return curr_tensor    
+    
+    
+    '''
         input_U: num_tensor x i_max x rank
     '''
     def L2_loss_dense(self, args, is_train, mode):
         _loss = 0            
+        random_idx = np.random.permutation(self.num_first_dim)
         for i in tqdm(range(0, self.num_first_dim, args.batch_lossnz)):                        
             Vprod = self.V[0]
             for j in range(1, self.tensor.order-2):
                 Vprod = khatri_rao(Vprod, self.V[j])   # i_2 * ... * i_(m-1) x rank        
        
             curr_batch_size = min(args.batch_lossnz, self.num_first_dim - i) 
+            input_idx = random_idx[i:i+curr_batch_size]
             assert(curr_batch_size > 1)
-            s_idx = self.U_mapping[i:i+curr_batch_size]
+            s_idx = self.U_mapping[input_idx]
             curr_S = self.S[s_idx, :].unsqueeze(1)  # bs' x 1 x rank
             VS = Vprod.unsqueeze(0) * curr_S   # bs' x i_2 * ... * i_(m-1) x rank        
             VS = torch.transpose(VS, 1, 2)   # bs' x rank x i_2 * ... * i_(m-1)        
             
-            curr_U = self.U[i:i+curr_batch_size]    # bs' x rank
+            curr_U = self.U[input_idx]    # bs' x rank
             if mode != "parafac2":
-                curr_mapping = self.mapping[i:i+curr_batch_size]   # bs'
+                curr_mapping = self.mapping[input_idx]   # bs'
                 curr_U_cluster = self.centroids[curr_mapping]  # bs' x rank
                 if mode=="train":                
                     sg_part = (curr_U - curr_U_cluster).detach()
@@ -202,7 +217,7 @@ class parafac2:
                     curr_U = curr_U_cluster
              # curr_U: batch size x i_max x rank
             approx = torch.bmm(curr_U.unsqueeze(1), VS).squeeze()   # bs' x i_2 * ... * i_(m-1)                    
-            curr_tensor = self.set_curr_tensor_new(curr_batch_size, i, 0)  # bs' x i_2 * ... * i_(m-1)                                
+            curr_tensor = self.set_curr_tensor_custom(input_idx, 0)  # bs' x i_2 * ... * i_(m-1)                                
             #curr_loss = torch.sum(torch.square(approx))
             curr_loss = torch.sum(torch.square(approx - curr_tensor))
             if is_train:
@@ -252,11 +267,13 @@ class parafac2:
             _loss += sq_sum.item()  
     
         # Correct non-zero terms                
+        random_idx = np.random.permutation(self.tensor.num_nnz)
         for i in tqdm(range(0, self.tensor.num_nnz, args.batch_lossnz)):
             curr_batch_size = min(args.batch_lossnz, self.tensor.num_nnz - i)
             assert(curr_batch_size > 1)
-            first_idx = torch.tensor(self.tensor.indices[0][i: i+curr_batch_size], device=self.device, dtype=torch.long) # bs
-            final_idx = torch.tensor(self.tensor.indices[-1][i: i+curr_batch_size], device=self.device, dtype=torch.long)  # bs
+            input_idx = random_idx[i:i+curr_batch_size]
+            first_idx = torch.tensor(self.tensor.indices[0][input_idx], device=self.device, dtype=torch.long) # bs
+            final_idx = torch.tensor(self.tensor.indices[-1][input_idx], device=self.device, dtype=torch.long)  # bs
             
             first_idx = first_idx + self.U_sidx[final_idx]   # batch size
             curr_U = self.U[first_idx, :]   # bs' x rank
@@ -270,10 +287,10 @@ class parafac2:
 
             approx = curr_U * self.S[final_idx, :]  # bs x rank
             for m in range(1, self.tensor.order-1):
-                curr_idx = torch.tensor(self.tensor.indices[m][i: i+curr_batch_size], device=self.device, dtype=torch.long)
+                curr_idx = torch.tensor(self.tensor.indices[m][input_idx], device=self.device, dtype=torch.long)
                 approx = approx * self.V[m-1][curr_idx, :]   # bs x rank
             
-            curr_value = torch.tensor(self.tensor.values[i: i+curr_batch_size], dtype=torch.double, device=self.device)
+            curr_value = torch.tensor(self.tensor.values[input_idx], dtype=torch.double, device=self.device)
             approx = torch.sum(approx, dim=1)
             #sq_err = -torch.sum(torch.square(approx))            
             sq_err = torch.sum(torch.square(curr_value - approx) - torch.square(approx))            
