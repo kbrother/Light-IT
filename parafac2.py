@@ -152,6 +152,11 @@ class parafac2:
         for m in range(_tensor.order-2):
             self.V[m] = torch.nn.Parameter(self.V[m])
         
+        if args.is_dense:
+            self.random_idx = np.random.permutation(self.num_first_dim)
+        else:
+            self.random_idx = np.random.permutation(self.tensor.num_nnz)
+        
         with torch.no_grad():
             if args.is_dense:
                 sq_loss = self.L2_loss_dense(args, False, "parafac2")
@@ -159,7 +164,6 @@ class parafac2:
                 sq_loss = self.L2_loss(args, False, "parafac2")
             print(f'fitness: {1 - math.sqrt(sq_loss)/math.sqrt(self.tensor.sq_sum)}') 
             print(f'square loss: {sq_loss}')       
-        
         
     '''
         Return a tensor of size 'batch size' x j_1*j_2*...*j_(d-2)        
@@ -192,14 +196,13 @@ class parafac2:
     '''
     def L2_loss_dense(self, args, is_train, mode):
         _loss = 0            
-        random_idx = np.random.permutation(self.num_first_dim)
         for i in tqdm(range(0, self.num_first_dim, args.batch_lossnz)):                        
             Vprod = self.V[0]
             for j in range(1, self.tensor.order-2):
                 Vprod = khatri_rao(Vprod, self.V[j])   # i_2 * ... * i_(m-1) x rank        
        
             curr_batch_size = min(args.batch_lossnz, self.num_first_dim - i) 
-            input_idx = random_idx[i:i+curr_batch_size]
+            input_idx = self.random_idx[i:i+curr_batch_size]
             assert(curr_batch_size > 1)
             s_idx = self.U_mapping[input_idx]
             curr_S = self.S[s_idx, :].unsqueeze(1)  # bs' x 1 x rank
@@ -266,12 +269,11 @@ class parafac2:
                 sq_sum.backward()
             _loss += sq_sum.item()  
     
-        # Correct non-zero terms                
-        random_idx = np.random.permutation(self.tensor.num_nnz)
+        # Correct non-zero terms                       
         for i in tqdm(range(0, self.tensor.num_nnz, args.batch_lossnz)):
             curr_batch_size = min(args.batch_lossnz, self.tensor.num_nnz - i)
             assert(curr_batch_size > 1)
-            input_idx = random_idx[i:i+curr_batch_size]
+            input_idx = self.random_idx[i:i+curr_batch_size]
             first_idx = torch.tensor(self.tensor.indices[0][input_idx], device=self.device, dtype=torch.long) # bs
             final_idx = torch.tensor(self.tensor.indices[-1][input_idx], device=self.device, dtype=torch.long)  # bs
             
