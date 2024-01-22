@@ -198,6 +198,18 @@ class parafac2:
         curr_tensor = torch.reshape(curr_tensor, (num_rows, -1))   # bs' x i_2 * ... * i_(m-1) 
         return curr_tensor    
     
+    '''
+        Return a tensor of size 'batch size' x j_1*j_2*...*j_(d-2)        
+    '''
+    def set_curr_tensor_custom(self, input_idx, _order):        
+        curr_tensor = self.tensor.src_tensor_torch[input_idx].to(self.device)  # bs' x i_2 x ... x i_(m-1)  
+        num_rows = 1
+        for i in range(_order + 1):
+            num_rows *= curr_tensor.shape[i]
+        
+        curr_tensor = torch.reshape(curr_tensor, (num_rows, -1))   # bs' x i_2 * ... * i_(m-1) 
+        return curr_tensor    
+    
     
     '''
         input_U: num_tensor x i_max x rank
@@ -212,15 +224,18 @@ class parafac2:
             curr_batch_size = min(args.batch_lossnz, self.num_first_dim - i) 
             #input_idx = self.random_idx[i:i+curr_batch_size]
             assert(curr_batch_size > 1)
+            #s_idx = self.U_mapping[input_idx]
             s_idx = self.shuffled_U_mapping[i:i+curr_batch_size]
             curr_S = self.S[s_idx, :].unsqueeze(1)  # bs' x 1 x rank
             VS = Vprod.unsqueeze(0) * curr_S   # bs' x i_2 * ... * i_(m-1) x rank        
             VS = torch.transpose(VS, 1, 2)   # bs' x rank x i_2 * ... * i_(m-1)        
             
             temp_random_idx = torch.tensor(self.random_idx[i:i+curr_batch_size], dtype=torch.long, device=self.device)
-            curr_U = self.U[temp_random_idx]    # bs' x rank
+            curr_U = self.U[temp_random_idx]    # bs' x rank            
+            #curr_U = self.U[input_idx]    # bs' x rank
             if mode != "parafac2":
-                curr_mapping = self.shuffled_mapping[i:i+curr_batch_size]   # bs'
+                #curr_mapping = self.mapping[input_idx]   # bs'
+                curr_mapping = self.shuffled_mapping[i:i+curr_batch_size]
                 curr_U_cluster = self.centroids[curr_mapping]  # bs' x rank
                 if mode=="train":                
                     sg_part = (curr_U - curr_U_cluster).detach()
@@ -382,9 +397,11 @@ class parafac2:
             #clear_memory()
             
             optimizer.step()            
-            if (_epoch + 1) % 10 == 0:
+            if (_epoch + 1) % 2 == 0:
                 with torch.no_grad():
                     self.mapping = self.clustering(args)
+                    if args.is_dense:
+                        self.shuffled_mapping = self.mapping[self.random_idx]
                     if args.is_dense:
                         _loss = self.L2_loss_dense(args, False, "test") 
                     else:
