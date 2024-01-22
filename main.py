@@ -117,7 +117,7 @@ if __name__ == '__main__':
             _parafac2.mapping = state_dict['mapping'].to(device)
             print(f"saved fitness: {state_dict['fitness']}")                        
         else:
-            _parafac2 = parafac2(_tensor, device, False, args)
+            _parafac2 = parafac2(_tensor, device, True, args)
             _parafac2.quantization(args)        
             clear_memory()
             with open(args.output_path + ".txt", 'a') as f:
