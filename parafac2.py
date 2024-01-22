@@ -153,9 +153,14 @@ class parafac2:
             self.V[m] = torch.nn.Parameter(self.V[m])
         
         if args.is_dense:
-            self.random_idx = np.random.permutation(self.num_first_dim)
+            random_idx = np.random.permutation(self.num_first_dim)
         else:
-            self.random_idx = np.random.permutation(self.tensor.num_nnz)
+            random_idx = np.random.permutation(self.tensor.num_nnz)
+            self.shuffled_indices = []
+            for m in range(self.tensor.order):
+                self.shuffled_indices.append(self.tensor.indices[m][random_idx])
+            self.shuffled_vals = self.tensor.values[random_idx]
+        
         
         with torch.no_grad():
             if args.is_dense:
@@ -273,9 +278,9 @@ class parafac2:
         for i in tqdm(range(0, self.tensor.num_nnz, args.batch_lossnz)):
             curr_batch_size = min(args.batch_lossnz, self.tensor.num_nnz - i)
             assert(curr_batch_size > 1)
-            input_idx = self.random_idx[i:i+curr_batch_size]
-            first_idx = torch.tensor(self.tensor.indices[0][input_idx], device=self.device, dtype=torch.long) # bs
-            final_idx = torch.tensor(self.tensor.indices[-1][input_idx], device=self.device, dtype=torch.long)  # bs
+            # input_idx = self.random_idx[i:i+curr_batch_size]
+            first_idx = torch.tensor(self.shuffled_indices[0][i:i+curr_batch_size], device=self.device, dtype=torch.long) # bs
+            final_idx = torch.tensor(self.shuffled_indices[-1][i:i+curr_batch_size], device=self.device, dtype=torch.long)  # bs
             
             first_idx = first_idx + self.U_sidx[final_idx]   # batch size
             curr_U = self.U[first_idx, :]   # bs' x rank
@@ -289,10 +294,10 @@ class parafac2:
 
             approx = curr_U * self.S[final_idx, :]  # bs x rank
             for m in range(1, self.tensor.order-1):
-                curr_idx = torch.tensor(self.tensor.indices[m][input_idx], device=self.device, dtype=torch.long)
+                curr_idx = torch.tensor(self.shuffled_indices[m][i:i+curr_batch_size], device=self.device, dtype=torch.long)
                 approx = approx * self.V[m-1][curr_idx, :]   # bs x rank
             
-            curr_value = torch.tensor(self.tensor.values[input_idx], dtype=torch.double, device=self.device)
+            curr_value = torch.tensor(self.shuffled_vals[i:i+curr_batch_size], dtype=torch.double, device=self.device)
             approx = torch.sum(approx, dim=1)
             #sq_err = -torch.sum(torch.square(approx))            
             sq_err = torch.sum(torch.square(curr_value - approx) - torch.square(approx))            
