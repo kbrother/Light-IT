@@ -397,12 +397,11 @@ class parafac2:
             #clear_memory()
             
             optimizer.step()            
-            if (_epoch + 1) % 2 == 0:
+            if (_epoch + 1) % 10 == 0:
                 with torch.no_grad():
                     self.mapping = self.clustering(args)
                     if args.is_dense:
                         self.shuffled_mapping = self.mapping[self.random_idx]
-                    if args.is_dense:
                         _loss = self.L2_loss_dense(args, False, "test") 
                     else:
                         _loss = self.L2_loss(args, False, "test")              
