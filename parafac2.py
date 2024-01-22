@@ -153,7 +153,10 @@ class parafac2:
             self.V[m] = torch.nn.Parameter(self.V[m])
         
         if args.is_dense:
-            random_idx = np.random.permutation(self.num_first_dim)
+            self.random_idx = np.random.permutation(self.num_first_dim)
+            self.shuffled_U_mapping = self.U_mapping[self.random_idx]   
+            self.shuffled_tensor = self.tensor.src_tensor_torch[self.random_idx]
+            
         else:
             random_idx = np.random.permutation(self.tensor.num_nnz)
             self.shuffled_indices = []
@@ -186,8 +189,8 @@ class parafac2:
     '''
         Return a tensor of size 'batch size' x j_1*j_2*...*j_(d-2)        
     '''
-    def set_curr_tensor_custom(self, input_idx, _order):        
-        curr_tensor = self.tensor.src_tensor_torch[input_idx].to(self.device)  # bs' x i_2 x ... x i_(m-1)  
+    def set_curr_tensor_shuffled(self, batch_size, start_i, _order):        
+        curr_tensor = self.shuffled_tensor[start_i:start_i + batch_size].to(self.device)  # bs' x i_2 x ... x i_(m-1)  
         num_rows = 1
         for i in range(_order + 1):
             num_rows *= curr_tensor.shape[i]
@@ -207,16 +210,17 @@ class parafac2:
                 Vprod = khatri_rao(Vprod, self.V[j])   # i_2 * ... * i_(m-1) x rank        
        
             curr_batch_size = min(args.batch_lossnz, self.num_first_dim - i) 
-            input_idx = self.random_idx[i:i+curr_batch_size]
+            #input_idx = self.random_idx[i:i+curr_batch_size]
             assert(curr_batch_size > 1)
-            s_idx = self.U_mapping[input_idx]
+            s_idx = self.shuffled_U_mapping[i:i+curr_batch_size]
             curr_S = self.S[s_idx, :].unsqueeze(1)  # bs' x 1 x rank
             VS = Vprod.unsqueeze(0) * curr_S   # bs' x i_2 * ... * i_(m-1) x rank        
             VS = torch.transpose(VS, 1, 2)   # bs' x rank x i_2 * ... * i_(m-1)        
             
-            curr_U = self.U[input_idx]    # bs' x rank
+            temp_random_idx = torch.tensor(self.random_idx[i:i+curr_batch_size], dtype=torch.long, device=self.device)
+            curr_U = self.U[temp_random_idx]    # bs' x rank
             if mode != "parafac2":
-                curr_mapping = self.mapping[input_idx]   # bs'
+                curr_mapping = self.shuffled_mapping[i:i+curr_batch_size]   # bs'
                 curr_U_cluster = self.centroids[curr_mapping]  # bs' x rank
                 if mode=="train":                
                     sg_part = (curr_U - curr_U_cluster).detach()
@@ -225,7 +229,7 @@ class parafac2:
                     curr_U = curr_U_cluster
              # curr_U: batch size x i_max x rank
             approx = torch.bmm(curr_U.unsqueeze(1), VS).squeeze()   # bs' x i_2 * ... * i_(m-1)                    
-            curr_tensor = self.set_curr_tensor_custom(input_idx, 0)  # bs' x i_2 * ... * i_(m-1)                                
+            curr_tensor = self.set_curr_tensor_shuffled(curr_batch_size, i, 0)  # bs' x i_2 * ... * i_(m-1)                                
             #curr_loss = torch.sum(torch.square(approx))
             curr_loss = torch.sum(torch.square(approx - curr_tensor))
             if is_train:
@@ -347,6 +351,7 @@ class parafac2:
             optimizer.zero_grad()
             # Clustering     
             self.mapping = self.clustering(args)  # num_rows, row idx of U -> idx of cluster
+            self.shuffled_mapping = self.mapping[self.random_idx]
             
             if args.is_dense:
                 self.L2_loss_dense(args, True, "train") 
