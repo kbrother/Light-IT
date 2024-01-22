@@ -351,7 +351,8 @@ class parafac2:
             optimizer.zero_grad()
             # Clustering     
             self.mapping = self.clustering(args)  # num_rows, row idx of U -> idx of cluster
-            self.shuffled_mapping = self.mapping[self.random_idx]
+            if args.is_dense:
+                self.shuffled_mapping = self.mapping[self.random_idx]
             
             if args.is_dense:
                 self.L2_loss_dense(args, True, "train") 
