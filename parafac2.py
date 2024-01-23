@@ -145,7 +145,7 @@ class parafac2:
             self.init_factor(args.is_dense)        
 
         # Upload to gpu        
-        self.centroids = scale_factor * torch.rand((_tensor.max_first, self.rank), device=device, dtype=torch.double)    # cluster centers,  i_max x rank
+        self.centroids = scale_factor * torch.rand((args.vocabs, self.rank), device=device, dtype=torch.double)    # cluster centers,  i_max x rank
         self.centroids = torch.nn.Parameter(self.centroids)                      
         self.U = torch.nn.Parameter(self.U)
         self.S = torch.nn.Parameter(self.S)
