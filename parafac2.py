@@ -118,9 +118,9 @@ class parafac2:
         self.device = device
         self.tensor = _tensor
         if args.is_dense:
-            scale_factor = 1
+            scale_factor = 0.1
         else:
-            scale_factor = 1
+            scale_factor = 0.01
         
         _sum = 0
         self.U_sidx = [0]  # num_tensor + 1, idx of tensor slice -> row idx of U
