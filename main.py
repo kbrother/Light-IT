@@ -81,6 +81,16 @@ if __name__ == '__main__':
         action="store", type=int,
     )
     
+    parser.add_argument(
+        "-s", "--seed", 
+        action="store", type=int,
+    )
+    
+    parser.add_argument(
+        "-v", "--vocab_size", 
+        action="store", type=int,
+    )
+    
     args = parser.parse_args()    
     torch.manual_seed(args.seed)
     random.seed(args.seed)
