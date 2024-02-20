@@ -45,3 +45,11 @@ The training processes of Light-IT and Light-IT++ are implemented in ```main.py`
   python 23-Irregular-Tensor/main.py train -tp ../input/23-Irregular-Tensor/usstock.npy -op output/usstock_r4_s0_lr0.01 -r 4 -d True -de 0 -lr 0.01 -e 500 -s 0 
 ```
 
+## Real-world datasets which we used
+|Name|N_max|N_avg|Size (except the 1st mode)|Order|Density|Source|Link|
+|-|-|-|-|-|-|-|-|
+|CMS|175|35.4|284 x 91,586|3|$$5.01 \times 10^{-3}$$|[US government](https://www.cms.gov/data-research/statistics-trends-and-reports/medicare-claims-synthetic-public-use-files/cms-2008-2010-data-entrepreneurs-synthetic-public-use-file-de-synpuf)|[Link](https://www.dropbox.com/scl/fi/v08po2cqscefhd4gxa0qa/cms.pickle?rlkey=a0dk7mval7s3n1cetpuotjwge&dl=0)| 
+|MIMIC-III|280|12.3|1,000 x 37,163|3|$$7.33 \times 10^{-3}$$|[MIMIC-III Clinical Database](https://physionet.org/content/mimiciii/1.4/)|[Link](https://www.dropbox.com/scl/fi/m306thilnzdbv9m76dgvk/mimic3.pickle?rlkey=em9mbyh81sqzp3dnhdave8ry9&dl=0)|
+|Korea-stock|5,270|3696.5|88 x 1,000|3|0.998|[DPar2](https://datalab.snu.ac.kr/dpar2/)|[Link](https://www.dropbox.com/scl/fi/kvnhu9pst84230cb86qmg/kstock.npy?rlkey=nmk7v3n4s2gztrbizxdjxk2oo&dl=0)|
+|US-stock|7,883|3912.6|88 x 1,000|3|1|[DPar2](https://datalab.snu.ac.kr/dpar2/)|[Link](https://www.dropbox.com/scl/fi/opmlfm2u7808hwhrjxzi4/usstock.npy?rlkey=jm61ntlcj0o78cupvwkyg5z96&dl=0)|
+
