@@ -13,7 +13,7 @@ tqdm==4.51.0
 
 ## Running Light-IT and Light-IT++
 The training processes of Light-IT and Light-IT++ are implemented in ```main.py```.
-### Positional argument
+### Positional arguments
 * `action`: `train_cp` when running only Light-IT, `train` when running Light-IT and Light-IT++.
 * `-tp`, `--tensor_path`:  file path for an irregular tensor. A file should be pickle files('.pickle') for sparse tensors and numpy files ('.numpy') for dense tensors.
 * `-op`, `--output_path`: output path for saving the parameters and fitness.
@@ -50,6 +50,16 @@ The training processes of Light-IT and Light-IT++ are implemented in ```main.py`
 * `usstock_r4_s0_lr0.01_cp.pt`: Saved the parameters of Light-IT
 * `usstock_r4_s0_lr0.01.pt`: Saved the parameters of Light-IT++
 
+## Checking the compressed size of the parameters
+Checking the compressed sizes of Light-IT and Light-IT++ are implemented in ```huffman.py```.
+### Positional arguments
+* `-tp, -r, -d, -de, -bz, -bnz, -cb, -tbz, -tbnz, -tbnx`: same with the cases of running Light-IT and Light-IT++.
+* `-rp, --result_path`: path for the '.pt' file.
+* `-cp`: "True" when using the output of Light-IT, "False" when using the output of Light-IT++
+### Example command
+```
+python huffman.py -tp ../data/23-Irregular-Tensor/cms.pickle -rp results/cms-lr0.01-rank5.pt -cp False -r 5 -de 0 -d False
+```
 
 ## Real-world datasets which we used
 |Name|N_max|N_avg|Size (except the 1st mode)|Order|Density|Source|Download Link|
