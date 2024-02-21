@@ -11,6 +11,15 @@ torch==1.13.1
 tqdm==4.51.0
 ```
 
+## Input formats
+Please download and check the datasets below for more details.
+### Sparse irregular tensors
+It should be a pickle file (.pickle) that saves a dictionary. 
+In the dictionary, 'idx' saves the indices of non-zero entries, and 'val' saves the values of them.
+
+### Dense irregular tensors
+It should be a numpy array (.npy) where each entry contains a slice of an irregular tensor.
+
 ## Running Light-IT and Light-IT++
 The training processes of Light-IT and Light-IT++ are implemented in ```main.py```.
 ### Positional arguments
