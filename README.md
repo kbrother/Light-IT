@@ -54,8 +54,8 @@ The training processes of Light-IT and Light-IT++ are implemented in ```main.py`
 Checking the compressed sizes of Light-IT and Light-IT++ are implemented in ```huffman.py```.
 ### Positional arguments
 * `-tp, -r, -d, -de, -bz, -bnz, -cb, -tbz, -tbnz, -tbnx`: same with the cases of running Light-IT and Light-IT++.
-* `-rp, --result_path`: path for the '.pt' file.
-* `-cp`: "True" when using the output of Light-IT, "False" when using the output of Light-IT++
+* `-rp`, `--result_path`: path for the '.pt' file.
+* `-cp`, `--is_cp`: "True" when using the output of Light-IT, "False" when using the output of Light-IT++
 ### Example command
 ```
 python huffman.py -tp ../data/23-Irregular-Tensor/cms.pickle -rp results/cms-lr0.01-rank5.pt -cp False -r 5 -de 0 -d False
