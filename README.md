@@ -54,9 +54,9 @@ The training processes of Light-IT and Light-IT++ are implemented in ```main.py`
 ## Real-world datasets which we used
 |Name|N_max|N_avg|Size (except the 1st mode)|Order|Density|Source|Download Link|
 |-|-|-|-|-|-|-|-|
-|CMS|175|35.4|284 x 91,586|3|$$5.01 \times 10^{-3}$$|[US government](https://www.cms.gov/data-research/statistics-trends-and-reports/medicare-claims-synthetic-public-use-files/cms-2008-2010-data-entrepreneurs-synthetic-public-use-file-de-synpuf)|[Link](https://www.dropbox.com/scl/fi/v08po2cqscefhd4gxa0qa/cms.pickle?rlkey=a0dk7mval7s3n1cetpuotjwge&dl=0)| 
-|MIMIC-III|280|12.3|1,000 x 37,163|3|$$7.33 \times 10^{-3}$$|[MIMIC-III Clinical Database](https://physionet.org/content/mimiciii/1.4/)|[Link](https://www.dropbox.com/scl/fi/m306thilnzdbv9m76dgvk/mimic3.pickle?rlkey=em9mbyh81sqzp3dnhdave8ry9&dl=0)|
+|CMS|175|35.4|284 x 91,586|3|0.00501|[US government](https://www.cms.gov/data-research/statistics-trends-and-reports/medicare-claims-synthetic-public-use-files/cms-2008-2010-data-entrepreneurs-synthetic-public-use-file-de-synpuf)|[Link](https://www.dropbox.com/scl/fi/v08po2cqscefhd4gxa0qa/cms.pickle?rlkey=a0dk7mval7s3n1cetpuotjwge&dl=0)| 
+|MIMIC-III|280|12.3|1,000 x 37,163|3|0.00733|[MIMIC-III Clinical Database](https://physionet.org/content/mimiciii/1.4/)|[Link](https://www.dropbox.com/scl/fi/m306thilnzdbv9m76dgvk/mimic3.pickle?rlkey=em9mbyh81sqzp3dnhdave8ry9&dl=0)|
 |Korea-stock|5,270|3696.5|88 x 1,000|3|0.998|[DPar2](https://datalab.snu.ac.kr/dpar2/)|[Link](https://www.dropbox.com/scl/fi/kvnhu9pst84230cb86qmg/kstock.npy?rlkey=nmk7v3n4s2gztrbizxdjxk2oo&dl=0)|
 |US-stock|7,883|3912.6|88 x 1,000|3|1|[DPar2](https://datalab.snu.ac.kr/dpar2/)|[Link](https://www.dropbox.com/scl/fi/opmlfm2u7808hwhrjxzi4/usstock.npy?rlkey=jm61ntlcj0o78cupvwkyg5z96&dl=0)|
-|Enron|554|80.6|1,000 x 1,000 x 939|4|$$6.93 \times 10^{-5}$$|[FROSTT](https://frostt.io/tensors/enron/)|[Link](https://www.dropbox.com/scl/fi/v3und62rvn90c37yeknr8/enron.pickle?rlkey=4i6derahcvl3xfl0mdiadv4pj&dl=0)|
-|Delicious|312|16.4|1,000 x 1,000 x 31,311|4|$$3.97 \times 10^{-6}$$|[FROSTT](https://frostt.io/tensors/delicious/)|[Link](https://www.dropbox.com/scl/fi/9krclnckqh09qp0fmtun2/delicious.pickle?rlkey=t4t87oqqexclqoun69n5lsdek&dl=0)|
+|Enron|554|80.6|1,000 x 1,000 x 939|4|0.0000693|[FROSTT](https://frostt.io/tensors/enron/)|[Link](https://www.dropbox.com/scl/fi/v3und62rvn90c37yeknr8/enron.pickle?rlkey=4i6derahcvl3xfl0mdiadv4pj&dl=0)|
+|Delicious|312|16.4|1,000 x 1,000 x 31,311|4|0.00000397|[FROSTT](https://frostt.io/tensors/delicious/)|[Link](https://www.dropbox.com/scl/fi/9krclnckqh09qp0fmtun2/delicious.pickle?rlkey=t4t87oqqexclqoun69n5lsdek&dl=0)|
