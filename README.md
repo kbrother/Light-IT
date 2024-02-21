@@ -45,6 +45,12 @@ The training processes of Light-IT and Light-IT++ are implemented in ```main.py`
   python 23-Irregular-Tensor/main.py train -tp ../input/23-Irregular-Tensor/usstock.npy -op output/usstock_r4_s0_lr0.01 -r 4 -d True -de 0 -lr 0.01 -e 500 -s 0 
 ```
 
+### Example output
+* `usstock_r4_s0_lr0.01.txt`: Saved the running time and fitness
+* `usstock_r4_s0_lr0.01_cp.pt`: Saved the parameters of Light-IT
+* `usstock_r4_s0_lr0.01.pt`: Saved the parameters of Light-IT++
+
+
 ## Real-world datasets which we used
 |Name|N_max|N_avg|Size (except the 1st mode)|Order|Density|Source|Download Link|
 |-|-|-|-|-|-|-|-|
