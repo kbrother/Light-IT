@@ -5,12 +5,18 @@ import torch
 from collections import Counter
 import itertools
 import math
+import heapq
 
 class tree:
     def __init__(self, entry_id, count):
         self.entry_id = entry_id
         self.count = count
         self.childs = []
+    
+    # override the comparison operator
+    def __lt__(self, nxt):
+        return self.count < nxt.count
+
 
 def dfs(curr_node, curr_bit, result_dict = {}):
     if len(curr_node.childs) == 0:
@@ -24,27 +30,19 @@ def dfs(curr_node, curr_bit, result_dict = {}):
 def huffman_encoding(indices):
     count_result = Counter(indices)
     count_result = [tree(k, v) for k, v in sorted(count_result.items(), key=lambda item: item[1])]
+    heapq.heapify(count_result)
     
     # Build huffman trees
     while len(count_result) > 1:
-        left_tree = count_result.pop(0)
-        right_tree = count_result.pop(0)
+        left_tree = heapq.heappop(count_result)
+        right_tree = heapq.heappop(count_result)
         new_tree = tree(-1, left_tree.count + right_tree.count)
-        new_tree.childs = [left_tree, right_tree]
-        
-        idx = 0
-        while idx < len(count_result) and new_tree.count >= count_result[idx].count:
-            idx += 1
-        
-        if len(count_result) == idx:
-            count_result.append(new_tree)
-        else:
-            count_result.insert(idx, new_tree)
+        new_tree.childs = [left_tree, right_tree]        
+        heapq.heappush(count_result, new_tree)
         
     # DFS to get the bits of each integer
     result_dict = {}
-    dfs(count_result[0], [], result_dict)
-    
+    dfs(count_result[0], [], result_dict)    
     return result_dict
     
     
