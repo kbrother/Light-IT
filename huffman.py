@@ -154,4 +154,10 @@ if __name__ == '__main__':
         print(f'fitness: {1 - math.sqrt(sq_loss)/math.sqrt(_tensor.sq_sum)}')
     cluster_result = result_dict['mapping'].cpu()  # k x i_max
         
-    print(f'num params: {encoding(_tensor, cluster_result)/64}')
+    num_bytes = torch.numel(_parafac2.centroids)
+    for m in range(_tensor.order-2):
+        num_bytes += torch.numel(_parafac2.V[m])
+    num_bytes += torch.numel(_parafac2.S)  
+    num_bytes *= 8
+    num_bytes += encoding(_tensor, cluster_result)/8 
+    print(f'num bytes: {num_bytes}')
