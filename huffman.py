@@ -69,6 +69,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-tp', "--tensor_path", type=str)    
     parser.add_argument('-rp', "--result_path", type=str)       
+    parser.add_argument('-r', "--rank", type=int)       
     parser.add_argument('-cp', "--is_cp", type=str)
     parser.add_argument('-d', "--is_dense", type=str, default="error")
     parser.add_argument(
