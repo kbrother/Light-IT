@@ -1,5 +1,5 @@
 import argparse
-from parafac2 import parafac2
+from model import LightIT
 from data import irregular_tensor
 import torch
 import gc
@@ -8,7 +8,7 @@ import random
 import numpy as np
 import time
 import math
-from parafac2 import clear_memory
+from model import clear_memory
 
 # python main.py test_init -tp ../input/23-Irregular-Tensor/action.npy -de 1 -r 2 -d True -s 0
 # python main.py test_init -tp ../input/23-Irregular-Tensor/cms.pickle -de 1 -r 2 -d False -s 0
@@ -33,12 +33,12 @@ if __name__ == '__main__':
     )    
     
     parser.add_argument(
-        "-bz", "--batch_lossz",
+        "-b", "--batch",
         action="store", default=2**10, type=int
     )
     
     parser.add_argument(
-        "-bnz", "--batch_lossnz",
+        "-bnz", "--batch_nz",
         action="store", default=2**22, type=int
     )
     
@@ -54,27 +54,7 @@ if __name__ == '__main__':
     
     parser.add_argument(
         "-lr", "--lr", action="store", type=float
-    )
-        
-    parser.add_argument(
-        "-cb", "--cluster_batch",
-        action="store", default=128, type=int
-    )
-    
-    parser.add_argument(
-        "-tbz", "--tucker_batch_lossz",
-        action="store", default=2**10, type=int
-    )
-    
-    parser.add_argument(
-        "-tbnz", "--tucker_batch_lossnz",
-        action="store", default=2**10, type=int
-    )
-    
-    parser.add_argument(
-        "-tbnx", "--tucker_batch_alsnx",
-        action="store", default=2**10, type=int
-    )
+    )        
     
     parser.add_argument(
         "-s", "--seed", 
@@ -99,54 +79,31 @@ if __name__ == '__main__':
             
     if args.action == "train_cp":
         start_time = time.time()
-        _parafac2 = parafac2(_tensor, device, True, args)
-        _parafac2.quantization(args)     
+        _model = LightIT(_tensor, device, True, args)
+        _model.quantization(args)     
         with open(args.output_path + ".txt", 'a') as f:
             f.write(f'cp time: {time.time() - start_time}\n')
             
     if args.action == "train":
         start_time = time.time()
         if os.path.exists(args.output_path + "_cp.pt"):            
-            _parafac2 = parafac2(_tensor, device, False, args)                
+            _model = LightIT(_tensor, device, False, args)                
             state_dict = torch.load(args.output_path + "_cp.pt", map_location=device)
-            _parafac2.centroids.data.copy_(state_dict['centroids'])
+            _model.centroids.data.copy_(state_dict['centroids'])
 
             for m in range(_tensor.order-2):
-                _parafac2.V[m].data.copy_(state_dict['V'][m].to(device))
-            _parafac2.S.data.copy_(state_dict['S'])
-            _parafac2.mapping = state_dict['mapping'].to(device)
+                _model.V[m].data.copy_(state_dict['V'][m].to(device))
+            _model.S.data.copy_(state_dict['S'])
+            _model.mapping = state_dict['mapping'].to(device)
             print(f"saved fitness: {state_dict['fitness']}")                        
         else:
-            _parafac2 = parafac2(_tensor, device, True, args)
-            _parafac2.quantization(args)        
+            _model = LightIT(_tensor, device, True, args)
+            _model.quantization(args)        
             clear_memory()
             with open(args.output_path + ".txt", 'a') as f:
                 f.write(f'cp time: {time.time() - start_time}\n')
             start_time = time.time()    
-        _parafac2.als(args)        
+        _model.als(args)        
         
         with open(args.output_path + ".txt", 'a') as f:
             f.write(f'tucker time: {time.time() - start_time}\n')
-            
-    elif args.action == "test_loss":
-        _parafac2 = parafac2(_tensor, device, True, args)
-        with torch.no_grad():
-            if args.is_dense:
-                print(f'dense: {_parafac2.L2_loss_dense(args, False, "parafac2")}')
-            else:
-                print(f'sparse: {_parafac2.L2_loss(args, False, "parafac2")}')            
-    
-    elif args.action == "test_tucker_loss":
-        _parafac2 = parafac2(_tensor, device, True, args)
-        _parafac2.init_tucker(args) 
-        _parafac2.mapping = _parafac2.clustering(args)
-        _parafac2.G = torch.rand([_parafac2.rank]*_tensor.order, device=_parafac2.device, dtype=torch.double)   
-        if args.is_dense:
-            sq_loss = _parafac2.L2_loss_tucker_dense(args.tucker_batch_lossnz)
-            print(f'dense: {sq_loss}')
-        else:
-            sq_loss = _parafac2.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)
-            print(f'sparse: {sq_loss}')
-            
-    elif args.action == "test_init":
-        _parafac2 = parafac2(_tensor, device, True, args)
