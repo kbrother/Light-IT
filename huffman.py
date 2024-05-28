@@ -1,5 +1,5 @@
 import argparse
-from parafac2 import parafac2
+from model import LightIT
 from data import irregular_tensor
 import torch
 from collections import Counter
@@ -78,33 +78,13 @@ if __name__ == '__main__':
     )    
 
     parser.add_argument(
-        "-bz", "--batch_lossz",
+        "-b", "--batch",
         action="store", default=2**10, type=int
     )
     
     parser.add_argument(
-        "-bnz", "--batch_lossnz",
+        "-bnz", "--batch_nz",
         action="store", default=2**22, type=int
-    )
-    
-    parser.add_argument(
-        "-cb", "--cluster_batch",
-        action="store", default=128, type=int
-    )
-    
-    parser.add_argument(
-        "-tbz", "--tucker_batch_lossz",
-        action="store", default=2**10, type=int
-    )
-    
-    parser.add_argument(
-        "-tbnz", "--tucker_batch_lossnz",
-        action="store", default=2**10, type=int
-    )
-    
-    parser.add_argument(
-        "-tbnx", "--tucker_batch_alsnx",
-        action="store", default=2**10, type=int
     )
     
     args = parser.parse_args()    
@@ -128,35 +108,36 @@ if __name__ == '__main__':
     result_dict = torch.load(args.result_path)
     print("load finish")
     
-    _parafac2 = parafac2(_tensor, device, False, args)        
-    _parafac2.centroids.data.copy_(result_dict['centroids'].to(device))
+    _model = LightIT(_tensor, device, False, args)        
+    _model.centroids.data.copy_(result_dict['centroids'].to(device))
     for m in range(_tensor.order-2):
-        _parafac2.V[m].data.copy_(result_dict['V'][m].to(device))
-    _parafac2.S.data.copy_(result_dict['S'].to(device))
+        _model.V[m].data.copy_(result_dict['V'][m].to(device))
+    _model.S.data.copy_(result_dict['S'].to(device))
         
-    _parafac2.mapping = result_dict['mapping'].to(device) # k x i_max
+    _model.mapping = result_dict['mapping'].to(device) # k x i_max
     if not args.is_cp:
-        _parafac2.G = result_dict['G'].to(device)    
+        _model.G = result_dict['G'].to(device)    
     with torch.no_grad():
         if args.is_dense:
             if args.is_cp:
-                with toch.no_grad():
-                    sq_loss = _parafac2.L2_loss_dense(args, False, "test")
+                with torch.no_grad():
+                    _model.shuffled_mapping = _model.mapping[_model.random_idx]
+                    sq_loss = _model.L2_loss_dense(args, False, "test")
             else:
-                sq_loss = _parafac2.L2_loss_tucker_dense(args.tucker_batch_lossnz)
+                sq_loss = _model.L2_loss_tucker_dense(args.batch_nz)
         else:
             if args.is_cp:
                 with torch.no_grad():
-                    sq_loss = _parafac2.L2_loss(args, False, "test")
+                    sq_loss = _model.L2_loss(args, False, "test")
             else:
-                sq_loss = _parafac2.L2_loss_tucker(args.tucker_batch_lossz, args.tucker_batch_lossnz)                
+                sq_loss = _model.L2_loss_tucker(args.batch, args.batch_nz)                
         print(f'fitness: {1 - math.sqrt(sq_loss)/math.sqrt(_tensor.sq_sum)}')
     cluster_result = result_dict['mapping'].cpu()  # k x i_max
         
-    num_bytes = torch.numel(_parafac2.centroids)
+    num_bytes = torch.numel(_model.centroids)
     for m in range(_tensor.order-2):
-        num_bytes += torch.numel(_parafac2.V[m])
-    num_bytes += torch.numel(_parafac2.S)  
+        num_bytes += torch.numel(_model.V[m])
+    num_bytes += torch.numel(_model.S)  
     num_bytes *= 8
     num_bytes += encoding(_tensor, cluster_result)/8 
     print(f'num bytes: {num_bytes}')

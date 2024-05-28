@@ -222,7 +222,6 @@ class LightIT:
                 Vprod = khatri_rao(Vprod, self.V[j])   # i_2 * ... * i_(m-1) x rank        
        
             curr_batch_size = min(args.batch_nz, self.num_first_dim - i) 
-            #input_idx = self.random_idx[i:i+curr_batch_size]
             assert(curr_batch_size > 1)
             #s_idx = self.U_mapping[input_idx]
             s_idx = self.shuffled_U_mapping[i:i+curr_batch_size]
@@ -297,7 +296,6 @@ class LightIT:
         for i in tqdm(range(0, self.tensor.num_nnz, args.batch_nz)):
             curr_batch_size = min(args.batch_nz, self.tensor.num_nnz - i)
             assert(curr_batch_size > 1)
-            # input_idx = self.random_idx[i:i+curr_batch_size]
             first_idx = torch.tensor(self.shuffled_indices[0][i:i+curr_batch_size], device=self.device, dtype=torch.long) # bs
             final_idx = torch.tensor(self.shuffled_indices[-1][i:i+curr_batch_size], device=self.device, dtype=torch.long)  # bs
             
