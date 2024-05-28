@@ -33,18 +33,14 @@ The training processes of Light-IT and Light-IT++ are implemented in ```main.py`
 * `-lr`, `--lr`: Learning rate for Light-IT.
 * `-s`, `--seed`: Seed of execution.
 
-**Please reduce the batch sizes (-bz, -bnz, -cb, -tbz, -tbnz, and -tbnx) when O.O.M occurs in GPU!**
 ### Optional arguments (common)
 * `-de`, `--device`: GPU id for execution.
-* `-bz`, `--batch_lossz`: Batch size for computing the loss (corresponding to the zero entries) of Light-IT.
-* `-bnz`, `--batch_lossnz`: Batch size for computing the loss (corresponding to the non-zero entries) of Light-IT.
-* `-cb`, `--cb`: Batch size for the clustering process of Light-IT.
+* `-b`, `--batch`: Batch size for computation in Light-IT
+* `-bnz`, `--batch_nz`: Batch size for computing the loss (corresponding to the non-zero entries) of Light-IT.
+**Please reduce the batch sizes (-bz, -bnz) when O.O.M occurs in GPU!**
 
 ### Optional arguments (Light-IT++)
 * `-ea`, `--epoch_als`: Number of epochs for Light-IT++.
-* `-tbz`, `--tucker_batch_lossz`: Batch size for the operations (dealing with zero entries) in ALS.
-* `-tbnz`, `--tucker_batch_lossnz`: Batch size for the operations (dealing with non-zero entries) in ALS.
-* `-tbnx`, `--tucker_batch_alsnx`: Batch size for the operations (not related to the tensor entries) in ALS.
 
 ### Example command 
 ```
@@ -63,7 +59,7 @@ The training processes of Light-IT and Light-IT++ are implemented in ```main.py`
 ## Checking the compressed size of the parameters
 Checking the compressed sizes of Light-IT and Light-IT++ are implemented in ```huffman.py```.
 ### Positional arguments
-* `-tp, -r, -d, -de, -bz, -bnz, -cb, -tbz, -tbnz, -tbnx`: same with the cases of running Light-IT and Light-IT++.
+* `-tp, -r, -d, -de, -bz, -bnz`: same with the cases of running Light-IT and Light-IT++.
 * `-rp`, `--result_path`: path for the '.pt' file.
 * `-cp`, `--is_cp`: "True" when using the output of Light-IT, "False" when using the output of Light-IT++
 ### Example command
